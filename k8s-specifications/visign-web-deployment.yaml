@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: visign-web
+  namespace: visign
+  labels:
+    app: visign-web
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: visign-web
+  template:
+    metadata:
+      labels:
+        app: visign-web
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: visign-web
+      containers:
+        - name: visign-web
+          image: __ACR_LOGIN_SERVER__/visign-web:latest   # replaced by CI/CD
+          ports:
+            - containerPort: 3000
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: NEXT_PUBLIC_API_URL
+              value: "http://visign-ai:8000"
+            - name: MODEL_SERVER_URL
+              value: "http://visign-ai:8000"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: visign-secrets
+                  key: DATABASE_URL
+            - name: NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: visign-secrets
+                  key: NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+            - name: CLERK_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: visign-secrets
+                  key: CLERK_SECRET_KEY
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 30
