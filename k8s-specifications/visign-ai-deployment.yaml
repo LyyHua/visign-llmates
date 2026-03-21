@@ -24,7 +24,7 @@ spec:
               app: visign-ai
       containers:
         - name: visign-ai
-          image: __ACR_LOGIN_SERVER__/visign-ai:latest   # replaced by CI/CD
+          image: visignacrftll4r7kkywwy.azurecr.io/visign-ai:817228ef0159ad8d43a72dd698b82495a848c127   # replaced by CI/CD
           ports:
             - containerPort: 8000
           resources:
