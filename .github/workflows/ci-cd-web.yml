@@ -33,6 +33,7 @@ jobs:
           DATABASE_URL=${{ secrets.DATABASE_URL }}
           OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
           NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
+          CLERK_SECRET_KEY=${{ secrets.CLERK_SECRET_KEY }}
           EOF
 
       - name: Build web image with Compose
@@ -47,7 +48,8 @@ jobs:
 
       - name: Tag and push image
         run: |
-          LOCAL_IMAGE=$(docker compose images -q nextjs)
+          LOCAL_IMAGE="visign-llmates-nextjs:latest"
+          docker image inspect "$LOCAL_IMAGE" > /dev/null
           docker tag "$LOCAL_IMAGE" "${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
           docker tag "$LOCAL_IMAGE" "${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest"
           docker push "${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"

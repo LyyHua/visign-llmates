@@ -47,7 +47,8 @@ jobs:
 
       - name: Tag and push image
         run: |
-          LOCAL_IMAGE=$(docker compose images -q fastapi)
+          LOCAL_IMAGE="visign-llmates-fastapi:latest"
+          docker image inspect "$LOCAL_IMAGE" > /dev/null
           docker tag "$LOCAL_IMAGE" "${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
           docker tag "$LOCAL_IMAGE" "${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest"
           docker push "${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
