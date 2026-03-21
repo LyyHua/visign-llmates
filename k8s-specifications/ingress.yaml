@@ -15,10 +15,24 @@ spec:
             pathType: Prefix
             backend:
               service:
+                name: visign-web
+                port:
+                  number: 3000
+          - path: /openapi.json
+            pathType: Prefix
+            backend:
+              service:
                 name: visign-ai
                 port:
                   number: 8000
           - path: /docs
+            pathType: Prefix
+            backend:
+              service:
+                name: visign-ai
+                port:
+                  number: 8000
+          - path: /redoc
             pathType: Prefix
             backend:
               service:
