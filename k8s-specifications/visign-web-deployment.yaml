@@ -27,6 +27,10 @@ spec:
           image: visignacrftll4r7kkywwy.azurecr.io/visign-web:860b57b2a4478616d24a844214eae8b9aefcda05   # replaced by CI/CD
           ports:
             - containerPort: 3000
+          volumeMounts:
+            - name: secrets-store
+              mountPath: "/mnt/secrets-store"
+              readOnly: true
           env:
             - name: NODE_ENV
               value: "production"
@@ -68,3 +72,10 @@ spec:
               port: 3000
             initialDelaySeconds: 30
             periodSeconds: 30
+      volumes:
+        - name: secrets-store
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: visign-kv-secrets
