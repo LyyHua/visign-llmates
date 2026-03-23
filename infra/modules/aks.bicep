@@ -35,6 +35,7 @@ resource aks 'Microsoft.ContainerService/managedClusters@2024-01-01' = {
         enableAutoScaling: true
         minCount: 2
         maxCount: 4
+        maxPods: 110
       }
     ]
     networkProfile: {
