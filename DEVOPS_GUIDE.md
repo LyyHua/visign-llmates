@@ -10,9 +10,10 @@
 **Stage 1:** Docker Images (visign-web, visign-ai)  
 **Stage 2:** Bicep IaC — Provision Azure Infrastructure (AKS, ACR, Key Vault)  
 **Stage 3:** Kubernetes Manifests (Deployment/Service/Ingress + 2 Replicas across 2 AZs)  
-**Stage 4:** CI/CD with GitHub Actions (Build → Push ACR → Deploy AKS)  
-**Stage 5:** Prometheus + Grafana Monitoring  
-**Stage 6:** Key Vault Secrets Integration  
+**Stage 4:** Key Vault Runtime Secrets  
+**Stage 5:** CI with GitHub Actions  
+**Stage 6:** Pull-based CD with ArgoCD  
+**Stage 7:** Prometheus + Grafana Monitoring  
 
 ---
 
@@ -26,14 +27,14 @@
        │  trigger                               │  │  (Next.js)      │  │
        ▼                                        │  ├─────────────────┤  │
 ┌──────────────┐                                │  │  visign-ai (x2) │  │
-│GitHub Actions│ ──deploy──────────────────────►│  │  (FastAPI)      │  │
-│   CI/CD      │                                │  ├─────────────────┤  │
+│GitHub Actions│ ──update manifests in Git─────►│  │  (FastAPI)      │  │
+│      CI      │                                │  ├─────────────────┤  │
 └──────────────┘                                │  │  Prometheus     │  │
                                                 │  │  Grafana        │  │
        ┌────────────┐                           │  ├─────────────────┤  │
        │ Key Vault  │◄─────secrets──────────────│  │  Ingress (nginx)│  │
        └────────────┘                           │  └─────────────────┘  │
-                                                │   Zone 1  │  Zone 2   │
+                                                │   Zone A  │  Zone B   │
                                                 └───────────────────────┘
 ```
 
@@ -109,7 +110,7 @@ visign-llmates/
 │   └── ...
 ├── nginx/                       # Nginx config (for K8s Ingress, not needed as container)
 │   └── default.conf
-├── k8s/                         # 🆕 Kubernetes manifests
+├── k8s-specifications/                         # 🆕 Kubernetes manifests
 │   ├── namespace.yaml
 │   ├── visign-web-deployment.yaml
 │   ├── visign-web-service.yaml
@@ -390,6 +391,9 @@ param nodeCount int = 2
 @description('VM size')
 param nodeVMSize string = 'Standard_B2s'
 
+@description('Availability zones for AKS system node pool')
+param nodeAvailabilityZones array
+
 @description('ACR ID to attach')
 param acrId string
 
@@ -401,7 +405,6 @@ resource aks 'Microsoft.ContainerService/managedClusters@2024-01-01' = {
   }
   properties: {
     dnsPrefix: aksName
-    kubernetesVersion: '1.29'
     agentPoolProfiles: [
       {
         name: 'agentpool'
@@ -409,10 +412,7 @@ resource aks 'Microsoft.ContainerService/managedClusters@2024-01-01' = {
         vmSize: nodeVMSize
         osType: 'Linux'
         mode: 'System'
-        availabilityZones: [
-          '1'
-          '2'
-        ]
+        availabilityZones: nodeAvailabilityZones
         enableAutoScaling: true
         minCount: 2
         maxCount: 4
@@ -465,6 +465,9 @@ param aksNodeCount int = 2
 @description('AKS node VM size')
 param aksNodeVMSize string = 'Standard_B2s'
 
+@description('AKS availability zones for the system node pool')
+param aksAvailabilityZones array
+
 // Variables
 var acrName = '${projectName}acr${uniqueString(resourceGroup().id)}'
 var aksName = '${projectName}-aks'
@@ -487,6 +490,7 @@ module aks 'modules/aks.bicep' = {
     location: location
     nodeCount: aksNodeCount
     nodeVMSize: aksNodeVMSize
+    nodeAvailabilityZones: aksAvailabilityZones
     acrId: acr.outputs.acrId
   }
 }
@@ -508,39 +512,82 @@ output keyVaultName string = keyVault.outputs.keyVaultName
 output keyVaultUri string = keyVault.outputs.keyVaultUri
 ```
 
-### 2F. Deploy Infrastructure
+### 2F. Subscription Bootstrap Bicep (`infra/main.subscription.bicep`)
+
+Use this file to keep resource group creation in IaC as well (no manual `az group create`).
+
+```bicep
+targetScope = 'subscription'
+
+@description('Resource group name for all Visign infrastructure')
+param resourceGroupName string = 'visign-rg'
+
+@description('Project name used as prefix')
+param projectName string = 'visign'
+
+@description('Azure region')
+param location string = 'southeastasia'
+
+@description('AKS node count')
+param aksNodeCount int = 2
+
+@description('AKS node VM size')
+param aksNodeVMSize string = 'Standard_B2s'
+
+@description('AKS availability zones for the system node pool')
+param aksAvailabilityZones array = [
+  '2'
+  '3'
+]
+
+resource rg 'Microsoft.Resources/resourceGroups@2022-09-01' = {
+  name: resourceGroupName
+  location: location
+}
+
+module platform './main.bicep' = {
+  name: 'deploy-visign-platform'
+  scope: rg
+  params: {
+    projectName: projectName
+    location: location
+    aksNodeCount: aksNodeCount
+    aksNodeVMSize: aksNodeVMSize
+    aksAvailabilityZones: aksAvailabilityZones
+  }
+}
+```
+
+### 2G. Deploy Infrastructure
 
 ```bash
-# 1. Create resource group
-az group create --name visign-rg --location southeastasia
+# 1. Deploy subscription-scope bootstrap (creates RG + deploys platform module)
+# Uses defaults from infra/main.subscription.bicepparam
+az deployment sub create \
+  --location southeastasia \
+  --template-file infra/main.subscription.bicep \
+  --parameters infra/main.subscription.bicepparam
 
-# 2. Deploy all infrastructure with Bicep
-az deployment group create \
-  --resource-group visign-rg \
-  --template-file infra/main.bicep \
-  --parameters infra/parameters.json
-
-# 3. Get outputs (save these — you'll need them everywhere)
+# 2. Get outputs
 az deployment group show \
   --resource-group visign-rg \
-  --name main \
+  --name deploy-visign-platform \
   --query properties.outputs
 
-# 4. Connect to AKS
+# 3. Connect to AKS
 az aks get-credentials --resource-group visign-rg --name visign-aks --overwrite-existing
 
-# 5. Verify
+# 4. Verify
 kubectl get nodes
 # You should see 2 nodes across 2 availability zones
 ```
-
 > **💡 TIP:** Run `kubectl describe nodes | grep -e "Name:" -e "topology.kubernetes.io/zone"` to verify nodes are in different AZs.
 
 ---
 
 ## Stage 3: Kubernetes Manifests
 
-### 3A. Namespace (`k8s/namespace.yaml`)
+### 3A. Namespace (`k8s-specifications/namespace.yaml`)
 
 ```yaml
 apiVersion: v1
@@ -551,7 +598,7 @@ metadata:
     app.kubernetes.io/part-of: visign
 ```
 
-### 3B. AI Service Deployment (`k8s/visign-ai-deployment.yaml`)
+### 3B. AI Service Deployment (`k8s-specifications/visign-ai-deployment.yaml`)
 
 ```yaml
 apiVersion: apps/v1
@@ -570,6 +617,10 @@ spec:
     metadata:
       labels:
         app: visign-ai
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
     spec:
       topologySpreadConstraints:
         - maxSkew: 1
@@ -604,7 +655,7 @@ spec:
             periodSeconds: 30
 ```
 
-### 3C. AI Service (`k8s/visign-ai-service.yaml`)
+### 3C. AI Service (`k8s-specifications/visign-ai-service.yaml`)
 
 ```yaml
 apiVersion: v1
@@ -624,7 +675,7 @@ spec:
   type: ClusterIP
 ```
 
-### 3D. Web Deployment (`k8s/visign-web-deployment.yaml`)
+### 3D. Web Deployment (`k8s-specifications/visign-web-deployment.yaml`)
 
 ```yaml
 apiVersion: apps/v1
@@ -656,6 +707,10 @@ spec:
           image: __ACR_LOGIN_SERVER__/visign-web:latest   # replaced by CI/CD
           ports:
             - containerPort: 3000
+          volumeMounts:
+            - name: secrets-store
+              mountPath: "/mnt/secrets-store"
+              readOnly: true
           env:
             - name: NODE_ENV
               value: "production"
@@ -697,9 +752,16 @@ spec:
               port: 3000
             initialDelaySeconds: 30
             periodSeconds: 30
+      volumes:
+        - name: secrets-store
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: visign-kv-secrets
 ```
 
-### 3E. Web Service (`k8s/visign-web-service.yaml`)
+### 3E. Web Service (`k8s-specifications/visign-web-service.yaml`)
 
 ```yaml
 apiVersion: v1
@@ -719,57 +781,9 @@ spec:
   type: ClusterIP
 ```
 
-### 3F. Ingress Controller Setup + Ingress (`k8s/ingress.yaml`)
+### 3F. Ingress Manifest (`k8s-specifications/ingress.yaml`)
 
-Use the Kubernetes-standard portable path: `ingress-nginx` + `cert-manager`.
-
-First install the NGINX Ingress Controller:
-
-```bash
-# Install NGINX Ingress Controller via Helm
-helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
-helm repo update
-helm install ingress-nginx ingress-nginx/ingress-nginx \
-  --namespace ingress-nginx --create-namespace \
-  --set controller.replicaCount=2
-```
-
-Then install cert-manager (for TLS automation with Let's Encrypt):
-
-```bash
-helm repo add jetstack https://charts.jetstack.io
-helm repo update
-helm install cert-manager jetstack/cert-manager \
-  --namespace cert-manager --create-namespace \
-  --set crds.enabled=true
-```
-
-Create a ClusterIssuer (one-time setup):
-
-```yaml
-apiVersion: cert-manager.io/v1
-kind: ClusterIssuer
-metadata:
-  name: letsencrypt-prod
-spec:
-  acme:
-    email: your-email@example.com
-    server: https://acme-v02.api.letsencrypt.org/directory
-    privateKeySecretRef:
-      name: letsencrypt-prod
-    solvers:
-      - http01:
-          ingress:
-            class: nginx
-```
-
-Apply it:
-
-```bash
-kubectl apply -f k8s/cluster-issuer.yaml
-```
-
-Then the Ingress resource:
+Define the ingress resource as a file.
 
 ```yaml
 apiVersion: networking.k8s.io/v1
@@ -795,10 +809,24 @@ spec:
             pathType: Prefix
             backend:
               service:
+                name: visign-web
+                port:
+                  number: 3000
+          - path: /openapi.json
+            pathType: Prefix
+            backend:
+              service:
                 name: visign-ai
                 port:
                   number: 8000
           - path: /docs
+            pathType: Prefix
+            backend:
+              service:
+                name: visign-ai
+                port:
+                  number: 8000
+          - path: /redoc
             pathType: Prefix
             backend:
               service:
@@ -814,75 +842,226 @@ spec:
                   number: 3000
 ```
 
-### 3G. Create K8s Secrets (manual, for first time)
+### 3G. ClusterIssuer Manifest (`k8s-specifications/cluster-issuer.yaml`)
 
-```bash
-# Create the namespace first
-kubectl apply -f k8s/namespace.yaml
+Define the TLS issuer as a file.
 
-# Create secrets manually (these will later be managed by Key Vault)
-kubectl create secret generic visign-secrets \
-  --namespace visign \
-  --from-literal=DATABASE_URL="postgresql://user:pass@host/db" \
-  --from-literal=NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY="pk_test_xxx" \
-  --from-literal=CLERK_SECRET_KEY="sk_test_xxx"
+```yaml
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    email: your-email@example.com
+    server: https://acme-v02.api.letsencrypt.org/directory
+    privateKeySecretRef:
+      name: letsencrypt-prod
+    solvers:
+      - http01:
+          ingress:
+            class: nginx
 ```
 
-### 3H. Deploy Everything
+### 3H. SecretProviderClass Manifest (`k8s-specifications/secrets-provider.yaml`)
 
-```bash
-kubectl apply -f k8s/namespace.yaml
-kubectl apply -f k8s/visign-ai-deployment.yaml
-kubectl apply -f k8s/visign-ai-service.yaml
-kubectl apply -f k8s/visign-web-deployment.yaml
-kubectl apply -f k8s/visign-web-service.yaml
-kubectl apply -f k8s/ingress.yaml
+Define Key Vault -> Kubernetes secret sync as a file.
 
-# Verify
-kubectl get all -n visign
-kubectl get ingress -n visign
+The `__KV_NAME__` and `__TENANT_ID__` placeholders will be replaced in **Stage 4A** using
+the Bicep output values. Leave them as-is for now.
+
+```yaml
+apiVersion: secrets-store.csi.x-k8s.io/v1
+kind: SecretProviderClass
+metadata:
+  name: visign-kv-secrets
+  namespace: visign
+spec:
+  provider: azure
+  parameters:
+    usePodIdentity: "false"
+    useVMManagedIdentity: "true"
+    userAssignedIdentityID: "__CSI_CLIENT_ID__"    # Replace in Stage 4A
+    keyvaultName: "__KV_NAME__"   # Replace with your KV name
+    cloudName: ""
+    objects: |
+      array:
+        - |
+          objectName: DATABASE-URL
+          objectType: secret
+        - |
+          objectName: CLERK-PUBLISHABLE-KEY
+          objectType: secret
+        - |
+          objectName: CLERK-SECRET-KEY
+          objectType: secret
+    tenantId: "__TENANT_ID__"      # Replace with your tenant ID
+  secretObjects:
+    - secretName: visign-secrets
+      type: Opaque
+      data:
+        - objectName: DATABASE-URL
+          key: DATABASE_URL
+        - objectName: CLERK-PUBLISHABLE-KEY
+          key: NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+        - objectName: CLERK-SECRET-KEY
+          key: CLERK_SECRET_KEY
+```
+
+### 3I. CSI Driver RBAC (`k8s-specifications/cluster-role.yaml`)
+
+The CSI Secrets Store driver needs permission to create/patch Kubernetes Secrets
+in the `visign` namespace. Without this, the volume mounts from Key Vault succeed
+but the `visign-secrets` K8s Secret (referenced by `secretKeyRef` in the web deployment)
+is never created.
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: csi-secrets-store-sync
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "delete", "get", "list", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: csi-secrets-store-sync-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: csi-secrets-store-sync
+subjects:
+  - kind: ServiceAccount
+    name: secrets-store-csi-driver
+    namespace: kube-system
 ```
 
 ---
 
-## Stage 4: CI/CD with GitHub Actions
+## Stage 4: Key Vault Runtime Secrets
 
-### 4A. Set Up GitHub Secrets
+### 4A. Grant yourself Key Vault access & patch `secrets-provider.yaml`
+
+Bicep created your Key Vault with RBAC mode, but only granted AKS access — not **you**.
+You need to give yourself write access first, then tell K8s which identity and
+vault to use.
+
+```bash
+# 1. Get Key Vault name from Bicep output
+KV_NAME=$(az deployment group show --resource-group visign-rg --name deploy-visign-platform \
+  --query properties.outputs.keyVaultName.value -o tsv)
+echo "Key Vault name: $KV_NAME"
+KV_SCOPE="/subscriptions/$(az account show --query id -o tsv)/resourceGroups/visign-rg/providers/Microsoft.KeyVault/vaults/$KV_NAME"
+
+# 2. Grant yourself "Key Vault Secrets Officer" so you can write secrets
+USER_OID=$(az ad signed-in-user show --query id -o tsv)
+az role assignment create \
+  --role "Key Vault Secrets Officer" \
+  --assignee "$USER_OID" \
+  --scope "$KV_SCOPE"
+# Wait ~30-60 seconds for RBAC propagation before the next step
+
+# 3. Get the CSI Secrets Provider addon identity clientId
+#    (AKS has multiple identities — the CSI driver needs to know WHICH one to use)
+CSI_CLIENT_ID=$(az aks show --resource-group visign-rg --name visign-aks \
+  --query addonProfiles.azureKeyvaultSecretsProvider.identity.clientId -o tsv)
+echo "CSI Identity Client ID: $CSI_CLIENT_ID"
+
+# 4. Grant the CSI identity "Key Vault Secrets User" so it can READ secrets
+#    (Bicep only granted the kubelet identity, but the CSI addon has its own identity)
+az role assignment create \
+  --role "Key Vault Secrets User" \
+  --assignee "$CSI_CLIENT_ID" \
+  --scope "$KV_SCOPE"
+
+# 5. Get your Azure tenant ID
+TENANT_ID=$(az account show --query tenantId -o tsv)
+echo "Tenant ID: $TENANT_ID"
+
+# 6. Replace ALL placeholders in secrets-provider.yaml
+sed -i "s|__KV_NAME__|$KV_NAME|g" k8s-specifications/secrets-provider.yaml
+sed -i "s|__TENANT_ID__|$TENANT_ID|g" k8s-specifications/secrets-provider.yaml
+sed -i "s|__CSI_CLIENT_ID__|$CSI_CLIENT_ID|g" k8s-specifications/secrets-provider.yaml
+
+# 7. Verify the file looks correct
+cat k8s-specifications/secrets-provider.yaml
+
+# 8. Commit and push (ArgoCD will deploy it)
+git add k8s-specifications/secrets-provider.yaml
+git commit -m "chore: set Key Vault name, tenant ID, and CSI identity in secrets-provider"
+git push
+```
+
+### 4B. Store Secrets in Key Vault
+
+Store only runtime keys currently consumed by the existing `k8s-specifications/visign-web-deployment.yaml` manifest.
+
+Credential mapping for runtime path:
+
+| Key Vault secret name | `secretObjects.data.key` in `secrets-provider.yaml` | Consumed in web deployment env |
+|---|---|---|
+| `DATABASE-URL` | `DATABASE_URL` | `DATABASE_URL` |
+| `CLERK-PUBLISHABLE-KEY` | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` |
+| `CLERK-SECRET-KEY` | `CLERK_SECRET_KEY` | `CLERK_SECRET_KEY` |
+
+```bash
+# Store your secrets (KV_NAME variable was set in step 4A above)
+az keyvault secret set --vault-name "$KV_NAME" --name "DATABASE-URL" \
+  --value "postgresql://user:pass@host/dbname"
+
+az keyvault secret set --vault-name "$KV_NAME" --name "CLERK-PUBLISHABLE-KEY" \
+  --value "pk_test_xxxx"
+
+az keyvault secret set --vault-name "$KV_NAME" --name "CLERK-SECRET-KEY" \
+  --value "sk_test_xxxx"
+```
+
+---
+
+## Stage 5: CI with GitHub Actions
+
+### 5A. Set Up GitHub Secrets
+
+Set these CI build secrets in GitHub Actions.
 
 Go to your GitHub repo → Settings → Secrets and variables → Actions, add:
 
 | Secret Name | Value |
 |---|---|
-| `AZURE_CREDENTIALS` | Output of `az ad sp create-for-rbac --name visign-cicd --role contributor --scopes /subscriptions/<SUB_ID>/resourceGroups/visign-rg --sdk-auth` |
 | `ACR_LOGIN_SERVER` | e.g. `visignacrabc123.azurecr.io` |
 | `ACR_USERNAME` | From ACR Access Keys |
 | `ACR_PASSWORD` | From ACR Access Keys |
-| `AKS_RESOURCE_GROUP` | `visign-rg` |
-| `AKS_CLUSTER_NAME` | `visign-aks` |
 | `DATABASE_URL` | Production Neon/Postgres connection string |
 | `OPENAI_API_KEY` | OpenAI API key for feedback generation |
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk publishable key |
+| `CLERK_SECRET_KEY` | Clerk secret key |
 | `TORCH_COMPUTE` | `cpu` for CPU node pools, `gpu` for GPU node pools |
 
-Disclaimer: You may store non-sensitive config in Repository Variables, but this guide keeps all required build values in Secrets for a single, consistent setup path.
-
-### 4B. CI/CD for AI Service (`.github/workflows/ci-cd-ai.yml`)
+### 5B. CI Workflow for AI Service (`.github/workflows/ci-cd-ai.yml`)
 
 ```yaml
-name: CI/CD - Visign AI Service
+name: CI - Visign AI Service
 
 on:
   push:
     branches: [main]
     paths:
-      - 'ai-model/**'
+      - "ai-model/**"
+      - ".github/workflows/ci-cd-ai.yml"
   pull_request:
     branches: [main]
     paths:
-      - 'ai-model/**'
+      - "ai-model/**"
+      - ".github/workflows/ci-cd-ai.yml"
 
 env:
   IMAGE_NAME: visign-ai
+
+permissions:
+  contents: write
 
 jobs:
   build-and-push:
@@ -891,15 +1070,10 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Login to ACR
-        uses: azure/docker-login@v1
         with:
-          login-server: ${{ secrets.ACR_LOGIN_SERVER }}
-          username: ${{ secrets.ACR_USERNAME }}
-          password: ${{ secrets.ACR_PASSWORD }}
+          fetch-depth: 0
 
-      - name: Build and push Docker image
+      - name: Write build env file
         run: |
           cat > .env <<EOF
           TORCH_COMPUTE=${{ secrets.TORCH_COMPUTE }}
@@ -908,66 +1082,8 @@ jobs:
           NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=dummy-for-ai-build
           EOF
 
-          docker compose build fastapi
-          docker tag visign-llmates-fastapi:latest ${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-          docker tag visign-llmates-fastapi:latest ${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest
-          docker push ${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-          docker push ${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest
-
-  deploy:
-    runs-on: ubuntu-latest
-    needs: build-and-push
-    if: github.ref == 'refs/heads/main'
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Azure Login
-        uses: azure/login@v2
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-
-      - name: Set AKS context
-        uses: azure/aks-set-context@v3
-        with:
-          resource-group: ${{ secrets.AKS_RESOURCE_GROUP }}
-          cluster-name: ${{ secrets.AKS_CLUSTER_NAME }}
-
-      - name: Deploy to AKS
-        run: |
-          sed -i "s|__ACR_LOGIN_SERVER__|${{ secrets.ACR_LOGIN_SERVER }}|g" k8s/visign-ai-deployment.yaml
-          sed -i "s|:latest|:${{ github.sha }}|g" k8s/visign-ai-deployment.yaml
-          kubectl apply -f k8s/namespace.yaml
-          kubectl apply -f k8s/visign-ai-deployment.yaml
-          kubectl apply -f k8s/visign-ai-service.yaml
-          kubectl rollout status deployment/visign-ai -n visign --timeout=300s
-```
-
-### 4C. CI/CD for Web Service (`.github/workflows/ci-cd-web.yml`)
-
-```yaml
-name: CI/CD - Visign Web Service
-
-on:
-  push:
-    branches: [main]
-    paths:
-      - 'visign/**'
-  pull_request:
-    branches: [main]
-    paths:
-      - 'visign/**'
-
-env:
-  IMAGE_NAME: visign-web
-
-jobs:
-  build-and-push:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push'
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - name: Build AI image with Compose
+        run: docker compose build fastapi
 
       - name: Login to ACR
         uses: azure/docker-login@v1
@@ -976,58 +1092,215 @@ jobs:
           username: ${{ secrets.ACR_USERNAME }}
           password: ${{ secrets.ACR_PASSWORD }}
 
-      - name: Build and push Docker image
+      - name: Tag and push image
+        run: |
+          LOCAL_IMAGE="visign-llmates-fastapi:latest"
+          docker image inspect "$LOCAL_IMAGE" > /dev/null
+          docker tag "$LOCAL_IMAGE" "${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          docker tag "$LOCAL_IMAGE" "${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest"
+          docker push "${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          docker push "${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest"
+
+      - name: Update AI manifest tag (GitOps)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          set -euo pipefail
+          sed -i "s|:latest|:${{ github.sha }}|g" k8s-specifications/visign-ai-deployment.yaml
+          sed -i "s|__ACR_LOGIN_SERVER__|${{ secrets.ACR_LOGIN_SERVER }}|g" k8s-specifications/visign-ai-deployment.yaml
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add k8s-specifications/visign-ai-deployment.yaml
+          git commit -m "ci(ai): update visign-ai image tag to ${{ github.sha }}" || exit 0
+
+          for attempt in 1 2 3; do
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+
+            echo "Push rejected (attempt ${attempt}), rebasing onto origin/main and retrying..."
+            git pull --rebase origin main
+          done
+
+          echo "Failed to push manifest update after 3 attempts"
+          exit 1
+```
+
+### 5C. CI Workflow for Web Service (`.github/workflows/ci-cd-web.yml`)
+
+```yaml
+name: CI - Visign Web Service
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "visign/**"
+      - ".github/workflows/ci-cd-web.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "visign/**"
+      - ".github/workflows/ci-cd-web.yml"
+
+env:
+  IMAGE_NAME: visign-web
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Write build env file
         run: |
           cat > .env <<EOF
           TORCH_COMPUTE=cpu
           DATABASE_URL=${{ secrets.DATABASE_URL }}
           OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
           NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
+          CLERK_SECRET_KEY=${{ secrets.CLERK_SECRET_KEY }}
           EOF
 
-          docker compose build nextjs
-          docker tag visign-llmates-nextjs:latest ${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-          docker tag visign-llmates-nextjs:latest ${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest
-          docker push ${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-          docker push ${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest
+      - name: Build web image with Compose
+        run: docker compose build nextjs
 
-  deploy:
-    runs-on: ubuntu-latest
-    needs: build-and-push
-    if: github.ref == 'refs/heads/main'
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Azure Login
-        uses: azure/login@v2
+      - name: Login to ACR
+        uses: azure/docker-login@v1
         with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          login-server: ${{ secrets.ACR_LOGIN_SERVER }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
 
-      - name: Set AKS context
-        uses: azure/aks-set-context@v3
-        with:
-          resource-group: ${{ secrets.AKS_RESOURCE_GROUP }}
-          cluster-name: ${{ secrets.AKS_CLUSTER_NAME }}
-
-      - name: Deploy to AKS
+      - name: Tag and push image
         run: |
-          sed -i "s|__ACR_LOGIN_SERVER__|${{ secrets.ACR_LOGIN_SERVER }}|g" k8s/visign-web-deployment.yaml
-          sed -i "s|:latest|:${{ github.sha }}|g" k8s/visign-web-deployment.yaml
-          kubectl apply -f k8s/namespace.yaml
-          kubectl apply -f k8s/visign-web-deployment.yaml
-          kubectl apply -f k8s/visign-web-service.yaml
-          kubectl apply -f k8s/ingress.yaml
-          kubectl rollout status deployment/visign-web -n visign --timeout=300s
+          LOCAL_IMAGE="visign-llmates-nextjs:latest"
+          docker image inspect "$LOCAL_IMAGE" > /dev/null
+          docker tag "$LOCAL_IMAGE" "${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          docker tag "$LOCAL_IMAGE" "${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest"
+          docker push "${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          docker push "${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest"
+
+      - name: Update web manifest tag (GitOps)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          set -euo pipefail
+          sed -i "s|:latest|:${{ github.sha }}|g" k8s-specifications/visign-web-deployment.yaml
+          sed -i "s|__ACR_LOGIN_SERVER__|${{ secrets.ACR_LOGIN_SERVER }}|g" k8s-specifications/visign-web-deployment.yaml
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add k8s-specifications/visign-web-deployment.yaml
+          git commit -m "ci(web): update visign-web image tag to ${{ github.sha }}" || exit 0
+
+          for attempt in 1 2 3; do
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+
+            echo "Push rejected (attempt ${attempt}), rebasing onto origin/main and retrying..."
+            git pull --rebase origin main
+          done
+
+          echo "Failed to push manifest update after 3 attempts"
+          exit 1
 ```
 
 ---
 
-## Stage 5: Prometheus + Grafana Monitoring
+## Stage 6: Pull-based CD with ArgoCD
 
-### 5A. Add Prometheus Metrics to FastAPI (CODE CHANGES)
+### 6A. Install ingress-nginx
 
-Yes, you DO need to add code. Install the library and add a few lines:
+```bash
+helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+helm repo update
+helm install ingress-nginx ingress-nginx/ingress-nginx \
+  --namespace ingress-nginx --create-namespace \
+  --set controller.replicaCount=2
+```
+
+### 6B. Install cert-manager
+
+```bash
+helm repo add jetstack https://charts.jetstack.io
+helm repo update
+helm install cert-manager jetstack/cert-manager \
+  --namespace cert-manager --create-namespace \
+  --set crds.enabled=true
+```
+
+### 6C. Install ArgoCD into AKS
+
+```bash
+kubectl create namespace argocd
+kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+```
+
+### 6D. Log in to ArgoCD
+
+```bash
+kubectl -n argocd port-forward svc/argocd-server 8080:443
+```
+
+In another terminal:
+
+```bash
+ARGOCD_PASSWORD=$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d)
+argocd login localhost:8080 --username admin --password "$ARGOCD_PASSWORD" --insecure
+```
+
+Open UI: `https://localhost:8080`
+
+### 6E. Create ArgoCD application (`k8s-specifications/argocd-application.yaml`)
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: visign
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/<your-org>/<your-repo>.git
+    targetRevision: main
+    path: k8s-specifications
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: visign
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+```
+
+### 6F. Bootstrap application and verify
+
+```bash
+kubectl apply -f k8s-specifications/argocd-application.yaml
+kubectl -n argocd get applications.argoproj.io
+```
+
+From this point onward:
+
+1. GitHub Actions does CI only (build + push + manifest tag commit).
+2. ArgoCD does CD only (pull + reconcile into AKS).
+
+---
+
+## Stage 7: Prometheus + Grafana Monitoring
+
+### 7A. Add Prometheus Metrics to FastAPI (CODE CHANGES)
+
+Add the required library and instrumentation code.
 
 **Add to `ai-model/requirements.txt`:**
 ```
@@ -1046,16 +1319,16 @@ app = FastAPI(title="sudo-visign Web App")
 Instrumentator().instrument(app).expose(app)
 ```
 
-That's it! This automatically creates a `/metrics` endpoint that Prometheus scrapes. It tracks:
+This creates a `/metrics` endpoint that Prometheus scrapes. It tracks:
 - Request count, latency, size per endpoint
 - HTTP status codes
 - In-progress requests
 
-### 5B. Add Prometheus Annotations to K8s Deployments
+### 7B. Add Prometheus Annotations to K8s Deployments
 
 Add these annotations to **both** deployment pod templates so Prometheus auto-discovers them:
 
-In `k8s/visign-ai-deployment.yaml`, add under `spec.template.metadata`:
+In `k8s-specifications/visign-ai-deployment.yaml`, add under `spec.template.metadata`:
 ```yaml
     metadata:
       labels:
@@ -1068,7 +1341,7 @@ In `k8s/visign-ai-deployment.yaml`, add under `spec.template.metadata`:
 
 For `visign-web`, Next.js doesn't natively expose Prometheus metrics, but Prometheus will still monitor the pods via kube-state-metrics and node-exporter (CPU, memory, restarts, etc.)
 
-### 5C. Install Prometheus + Grafana via Helm
+### 7C. Install Prometheus + Grafana via Helm
 
 Create `monitoring/prometheus-values.yaml`:
 
@@ -1143,7 +1416,7 @@ kubectl get svc -n monitoring monitoring-grafana
 # Login: admin / visign-admin-2024
 ```
 
-### 5D. Grafana Dashboard Setup
+### 7D. Grafana Dashboard Setup
 
 Once logged into Grafana:
 
@@ -1157,7 +1430,7 @@ For **custom Visign metrics**, create a new dashboard:
 - Panel 3: `sum(up{namespace="visign"})` → Running pods count
 - Panel 4: `container_memory_usage_bytes{namespace="visign"}` → Memory usage
 
-### 5E. Basic Alert Rules
+### 7E. Basic Alert Rules
 
 Grafana has built-in alerts. Set up these basic ones:
 
@@ -1167,95 +1440,15 @@ Grafana has built-in alerts. Set up these basic ones:
 
 ---
 
-## Stage 6: Key Vault Secrets Integration
-
-### 6A. Store Secrets in Key Vault
+## Cost Saving
 
 ```bash
-# Get your Key Vault name from Bicep output
-KV_NAME=$(az deployment group show --resource-group visign-rg --name main \
-  --query properties.outputs.keyVaultName.value -o tsv)
+# Stop AKS cluster (deallocates node compute)
+az aks stop --resource-group visign-rg --name visign-aks
 
-# Store your secrets
-az keyvault secret set --vault-name $KV_NAME --name "DATABASE-URL" \
-  --value "postgresql://user:pass@host/dbname"
-
-az keyvault secret set --vault-name $KV_NAME --name "CLERK-PUBLISHABLE-KEY" \
-  --value "pk_test_xxxx"
-
-az keyvault secret set --vault-name $KV_NAME --name "CLERK-SECRET-KEY" \
-  --value "sk_test_xxxx"
-```
-
-### 6B. Create SecretProviderClass (`k8s/secrets-provider.yaml`)
-
-```yaml
-apiVersion: secrets-store.csi.x-k8s.io/v1
-kind: SecretProviderClass
-metadata:
-  name: visign-kv-secrets
-  namespace: visign
-spec:
-  provider: azure
-  parameters:
-    usePodIdentity: "false"
-    useVMManagedIdentity: "true"
-    userAssignedIdentityID: ""    # Leave empty for system-assigned
-    keyvaultName: "__KV_NAME__"   # Replace with your KV name
-    cloudName: ""
-    objects: |
-      array:
-        - |
-          objectName: DATABASE-URL
-          objectType: secret
-        - |
-          objectName: CLERK-PUBLISHABLE-KEY
-          objectType: secret
-        - |
-          objectName: CLERK-SECRET-KEY
-          objectType: secret
-    tenantId: "__TENANT_ID__"      # Replace with your tenant ID
-  secretObjects:
-    - secretName: visign-secrets
-      type: Opaque
-      data:
-        - objectName: DATABASE-URL
-          key: DATABASE_URL
-        - objectName: CLERK-PUBLISHABLE-KEY
-          key: NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
-        - objectName: CLERK-SECRET-KEY
-          key: CLERK_SECRET_KEY
-```
-
-Add this volume mount to the `visign-web` deployment:
-
-```yaml
-      volumes:
-        - name: secrets-store
-          csi:
-            driver: secrets-store.csi.k8s.io
-            readOnly: true
-            volumeAttributes:
-              secretProviderClass: visign-kv-secrets
-      containers:
-        - name: visign-web
-          volumeMounts:
-            - name: secrets-store
-              mountPath: "/mnt/secrets-store"
-              readOnly: true
-```
-
-### 6C. Deploy Secret Provider
-
-```bash
-# Replace placeholders
-KV_NAME="your-keyvault-name"
-TENANT_ID=$(az account show --query tenantId -o tsv)
-
-sed -i "s|__KV_NAME__|$KV_NAME|g" k8s/secrets-provider.yaml
-sed -i "s|__TENANT_ID__|$TENANT_ID|g" k8s/secrets-provider.yaml
-
-kubectl apply -f k8s/secrets-provider.yaml
+# Resume later
+az aks start --resource-group visign-rg --name visign-aks
+az aks get-credentials --resource-group visign-rg --name visign-aks --overwrite-existing
 ```
 
 ---
@@ -1263,15 +1456,14 @@ kubectl apply -f k8s/secrets-provider.yaml
 ## Quick Reference: Order of Operations
 
 ```
-1. az login
-2. az deployment group create (Bicep → ACR + AKS + Key Vault)
-3. az aks get-credentials (connect to cluster)
-4. az keyvault secret set (store secrets)
-5. helm install ingress-nginx (install ingress controller)
-6. helm install monitoring (install Prometheus+Grafana)
-7. kubectl apply -f k8s/ (deploy everything)
-8. Push code to GitHub → GitHub Actions auto builds+deploys
-9. Access Grafana → set up dashboards
+Stage 0: Install tooling and authenticate Azure CLI.
+Stage 1: Build and verify local Docker images with Docker Compose.
+Stage 2: Deploy infrastructure with infra/main.subscription.bicep + infra/main.subscription.bicepparam.
+Stage 3: Author and commit all Kubernetes manifests in k8s-specifications/.
+Stage 4: Store Key Vault runtime secrets.
+Stage 5: Set GitHub CI secrets and run CI workflows.
+Stage 6: Bootstrap ArgoCD and let ArgoCD reconcile.
+Stage 7: Install kube-prometheus-stack and configure Grafana dashboards/alerts.
 ```
 
 ---
@@ -1282,12 +1474,14 @@ kubectl apply -f k8s/secrets-provider.yaml
 |---------|----------|
 | `ImagePullBackOff` | ACR not attached to AKS. Run: `az aks update -n visign-aks -g visign-rg --attach-acr <acr-name>` |
 | Pod stuck `Pending` | Not enough resources. Check: `kubectl describe pod <name> -n visign` |
-| Ingress no external IP | Wait 2-3 min. Check: `kubectl get svc -n ingress-nginx` |
+| Ingress no external IP | Check events first: `kubectl describe svc -n ingress-nginx ingress-nginx-controller`. If you see `PublicIPCountLimitReached`, free unused Public IPs in this region or request quota increase, then wait for reconcile. |
 | Grafana not loading | Check pod: `kubectl logs -n monitoring -l app.kubernetes.io/name=grafana` |
-| Bicep deployment fails | Check: `az deployment group show -g visign-rg -n main --query properties.error` |
-| CI/CD deploy fails | Check GitHub Actions logs. Ensure `AZURE_CREDENTIALS` secret is set correctly |
+| Bicep deployment fails | Check subscription deployment errors: `az deployment sub list --query "[].{name:name,state:properties.provisioningState}" -o table` then `az deployment sub show --name <deployment-name> --query properties.error` |
+| CI pipeline fails | Check GitHub Actions logs and verify ACR/env secrets are set correctly |
+| ArgoCD app not syncing | Check: `kubectl -n argocd get applications.argoproj.io` and `argocd app get visign` |
 | `required variable TORCH_COMPUTE is missing a value` in `docker compose build` | Add `TORCH_COMPUTE=cpu` or `TORCH_COMPUTE=gpu` to repo-root `.env` |
 | `docker-credential-desktop` not found | Remove `"credsStore": "desktop"` from `~/.docker/config.json`, then run `docker login` |
 | `next: not found` during Docker build | In Dockerfile use `npm ci --include=dev` in build stage, then rebuild with `--no-cache` |
 | AI build times out downloading CUDA wheels | Install CPU-only torch from `https://download.pytorch.org/whl/cpu` and use runtime-only requirements |
-| `No database connection string was provided to neon()` during `npm run build` | Add `export const dynamic = "force-dynamic"` in DB-backed route layouts (e.g. `(main)` and `lesson`), and make sure `DATABASE_URL` is set in repo-root `.env` before running `docker compose build` |
+| `No database connection string was provided to neon()` during `npm run build` | Ensure `DATABASE_URL` exists in repo-root `.env` before running `docker compose build` |
+| `/docs` shows Swagger but fails `Not Found /openapi.json` | In ingress, route `/openapi.json` to `visign-ai:8000` and keep `/api` routed to `visign-web:3000` |
