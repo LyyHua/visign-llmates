@@ -6,10 +6,18 @@ metadata:
   annotations:
     nginx.ingress.kubernetes.io/proxy-body-size: "100m"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
 spec:
   ingressClassName: nginx
+  tls:
+    - hosts:
+        - 57.158.168.177.nip.io
+      secretName: visign-tls
   rules:
-    - http:
+    - host: 57.158.168.177.nip.io
+      http:
         paths:
           - path: /api
             pathType: Prefix
