@@ -2,5 +2,7 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: visign
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
   labels:
     app.kubernetes.io/part-of: visign
