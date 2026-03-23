@@ -62,7 +62,7 @@ jobs:
         if: github.ref == 'refs/heads/main'
         run: |
           set -euo pipefail
-          sed -i "s|:latest|:${{ github.sha }}|g" k8s-specifications/visign-web-deployment.yaml
+          sed -i "s|\(visign-web\):[^ ]*|\1:${{ github.sha }}|g" k8s-specifications/visign-web-deployment.yaml
           sed -i "s|__ACR_LOGIN_SERVER__|${{ secrets.ACR_LOGIN_SERVER }}|g" k8s-specifications/visign-web-deployment.yaml
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
