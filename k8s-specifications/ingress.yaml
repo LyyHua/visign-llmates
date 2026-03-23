@@ -6,17 +6,18 @@ metadata:
   annotations:
     nginx.ingress.kubernetes.io/proxy-body-size: "100m"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
-    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    cert-manager.io/cluster-issuer: "letsencrypt-dns"
+    acme.cert-manager.io/http01-edit-in-place: "true"
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
 spec:
   ingressClassName: nginx
   tls:
     - hosts:
-        - 57.158.168.177.nip.io
+        - lyhua.dpdns.org
       secretName: visign-tls
   rules:
-    - host: 57.158.168.177.nip.io
+    - host: lyhua.dpdns.org
       http:
         paths:
           - path: /api
