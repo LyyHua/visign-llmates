@@ -24,7 +24,7 @@ spec:
               app: visign-web
       containers:
         - name: visign-web
-          image: visignacrftll4r7kkywwy.azurecr.io/visign-web:860b57b2a4478616d24a844214eae8b9aefcda05   # replaced by CI/CD
+          image: visignacrftll4r7kkywwy.azurecr.io/visign-web:3439bb10af2602d5db4688dc452cd2b79718e32b   # replaced by CI/CD
           ports:
             - containerPort: 3000
           volumeMounts:
