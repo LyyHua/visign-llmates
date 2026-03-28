@@ -15,6 +15,12 @@ spec:
       labels:
         app: visign-web
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        fsGroupChangePolicy: OnRootMismatch
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: topology.kubernetes.io/zone
@@ -31,6 +37,8 @@ spec:
             - name: secrets-store
               mountPath: "/mnt/secrets-store"
               readOnly: true
+            - name: next-cache
+              mountPath: "/app/.next/cache"
           env:
             - name: NODE_ENV
               value: "production"
@@ -79,3 +87,5 @@ spec:
             readOnly: true
             volumeAttributes:
               secretProviderClass: visign-kv-secrets
+        - name: next-cache
+          emptyDir: {}
