@@ -583,6 +583,26 @@ kubectl get nodes
 ```
 > **💡 TIP:** Run `kubectl describe nodes | grep -e "Name:" -e "topology.kubernetes.io/zone"` to verify nodes are in different AZs.
 
+### 2G.1 Hard check for 2-AZ requirement (Pass/Fail)
+
+Use this check before marking the requirement complete.
+
+```bash
+# Shows each node and its zone label
+kubectl get nodes -L topology.kubernetes.io/zone
+
+# Count unique zones represented by Ready nodes (Linux/macOS)
+kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.labels.topology\.kubernetes\.io/zone}{"\n"}{end}' \
+  | sort -u | wc -l
+```
+
+Pass criteria:
+
+- At least 2 unique zone values are present.
+- Each workload has `replicas: 2` and `topologySpreadConstraints` using `topology.kubernetes.io/zone`.
+
+If only 1 zone appears, do not claim 2-AZ compliance yet. Check cluster creation inputs in `infra/main.subscription.bicepparam` and node pool distribution.
+
 ---
 
 ## Stage 3: Kubernetes Manifests
@@ -781,86 +801,102 @@ spec:
   type: ClusterIP
 ```
 
-### 3F. Ingress Manifest (`k8s-specifications/ingress.yaml`)
+### 3F. Gateway + HTTPRoute (`k8s-specifications/httproute.yaml`)
 
-Define the ingress resource as a file.
+Replaces nginx Ingress. AGC uses the Kubernetes **Gateway API** instead of the legacy `networking.k8s.io/v1 Ingress`.
+
+- `Gateway` → references the AGC resource (created in Azure Portal) and the TLS cert Secret auto-managed by cert-manager.
+- `HTTPRoute (http)` → 301 redirects all HTTP → HTTPS.
+- `HTTPRoute (https)` → routes traffic to services.
+
+cert-manager automatically obtains and renews the Let's Encrypt cert via Cloudflare DNS-01 challenge
+and writes it into the `visign-tls` Secret that the Gateway references (see Stage 6A-6B).
 
 ```yaml
-apiVersion: networking.k8s.io/v1
-kind: Ingress
+---
+# Gateway — references AGC and the TLS cert Secret
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
 metadata:
-  name: visign-ingress
+  name: visign-gateway
   namespace: visign
   annotations:
-    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
-    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    alb.networking.azure.io/alb-namespace: azure-alb-system
+    alb.networking.azure.io/alb-name: visign-agc
 spec:
-  ingressClassName: nginx
-  tls:
-    - hosts:
-        - visign.example.com
-      secretName: visign-tls
-  rules:
-    - host: visign.example.com
-      http:
-        paths:
-          - path: /api
-            pathType: Prefix
-            backend:
-              service:
-                name: visign-web
-                port:
-                  number: 3000
-          - path: /openapi.json
-            pathType: Prefix
-            backend:
-              service:
-                name: visign-ai
-                port:
-                  number: 8000
-          - path: /docs
-            pathType: Prefix
-            backend:
-              service:
-                name: visign-ai
-                port:
-                  number: 8000
-          - path: /redoc
-            pathType: Prefix
-            backend:
-              service:
-                name: visign-ai
-                port:
-                  number: 8000
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: visign-web
-                port:
-                  number: 3000
-```
-
-### 3G. ClusterIssuer Manifest (`k8s-specifications/cluster-issuer.yaml`)
-
-Define the TLS issuer as a file.
-
-```yaml
-apiVersion: cert-manager.io/v1
-kind: ClusterIssuer
+  gatewayClassName: azure-alb-external
+  listeners:
+    - name: http
+      port: 80
+      protocol: HTTP
+      allowedRoutes:
+        namespaces:
+          from: Same
+    - name: https
+      port: 443
+      protocol: HTTPS
+      allowedRoutes:
+        namespaces:
+          from: Same
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: visign-tls       # written by cert-manager
+            namespace: visign
+---
+# HTTP → HTTPS redirect
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
 metadata:
-  name: letsencrypt-prod
+  name: visign-http-redirect
+  namespace: visign
 spec:
-  acme:
-    email: your-email@example.com
-    server: https://acme-v02.api.letsencrypt.org/directory
-    privateKeySecretRef:
-      name: letsencrypt-prod
-    solvers:
-      - http01:
-          ingress:
-            class: nginx
+  parentRefs:
+    - name: visign-gateway
+      sectionName: http
+  rules:
+    - filters:
+        - type: RequestRedirect
+          requestRedirect:
+            scheme: https
+            statusCode: 301
+---
+# HTTPS routes
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: visign-https-routes
+  namespace: visign
+spec:
+  parentRefs:
+    - name: visign-gateway
+      sectionName: https
+  hostnames:
+    - "lyhua.dpdns.org"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/ai
+        - path:
+            type: PathPrefix
+            value: /openapi.json
+        - path:
+            type: PathPrefix
+            value: /docs
+        - path:
+            type: PathPrefix
+            value: /redoc
+      backendRefs:
+        - name: visign-ai
+          port: 8000
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: visign-web
+          port: 3000
 ```
 
 ### 3H. SecretProviderClass Manifest (`k8s-specifications/secrets-provider.yaml`)
@@ -1215,17 +1251,54 @@ jobs:
 
 ## Stage 6: Pull-based CD with ArgoCD
 
-### 6A. Install ingress-nginx
+### 6A. Create AGC in Azure Portal + Install ALB Controller
+
+Azure Application Gateway for Containers (AGC) replaces nginx-ingress.
+TLS certificates are still handled by cert-manager (see 6B) — AGC just reads the resulting K8s Secret.
+
+**Prerequisites in Azure Portal (do once):**
+1. Create an **Application Gateway for Containers** resource:
+   - Basics: Name = `visign-agc`, Resource group = `visign-rg`, same region as AKS
+   - Frontends: add a frontend (public IP auto-allocated — note this IP for DNS)
+   - Associations: link to the AKS VNet + subnet
+   - Skip Security policies and Tags
+2. The AGC name (`visign-agc`) must match `alb.networking.azure.io/alb-name` in `httproute.yaml`
+
+**Install Gateway API CRDs + ALB Controller into AKS:**
 
 ```bash
-helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+# Install Gateway API CRDs (required before ALB controller)
+kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.0/standard-install.yaml
+
+# Add ALB controller Helm repo
+helm repo add aks-alb-controller https://azure.github.io/application-gateway-for-containers/helm
 helm repo update
-helm install ingress-nginx ingress-nginx/ingress-nginx \
-  --namespace ingress-nginx --create-namespace \
-  --set controller.replicaCount=2
+
+# Install ALB controller
+helm install alb-controller aks-alb-controller/alb-controller \
+  --namespace azure-alb-system --create-namespace \
+  --set albController.namespace=azure-alb-system \
+  --set albController.podIdentity.clientID=$(az identity show \
+    --resource-group visign-rg \
+    --name alb-identity \
+    --query clientId -o tsv)
+
+# Verify
+kubectl get pods -n azure-alb-system
 ```
 
-### 6B. Install cert-manager
+**If ingress-nginx was previously installed, remove it:**
+```bash
+helm uninstall ingress-nginx -n ingress-nginx
+kubectl delete namespace ingress-nginx
+```
+
+### 6B. Install cert-manager + Cloudflare DNS-01 Issuer
+
+cert-manager is the Kubernetes equivalent of certbot — it automatically obtains and renews
+a Let's Encrypt certificate via the **Cloudflare DNS-01 challenge**. No HTTP challenge needed,
+no need for a working ingress first. cert-manager writes the cert into the `visign-tls` K8s Secret
+that your AGC Gateway reads.
 
 ```bash
 helm repo add jetstack https://charts.jetstack.io
@@ -1235,7 +1308,77 @@ helm install cert-manager jetstack/cert-manager \
   --set crds.enabled=true
 ```
 
+**Create a Cloudflare API token** (cert-manager needs it to create DNS TXT records):
+1. Go to [Cloudflare Dashboard](https://dash.cloudflare.com/profile/api-tokens) → **API Tokens** → **Create Token**
+2. Use template: **Edit zone DNS** → scope to your zone (`lyhua.dpdns.org`) → **Create Token**
+3. Copy the token value
+
+**Store the token as a K8s Secret:**
+```bash
+kubectl create secret generic cloudflare-api-token \
+  --from-literal=api-token="<YOUR_CLOUDFLARE_API_TOKEN>" \
+  --namespace cert-manager
+```
+
+**Apply the ClusterIssuer** (`k8s-specifications/cluster-issuer-dns.yaml` — already in repo):
+```bash
+kubectl apply -f k8s-specifications/cluster-issuer-dns.yaml
+```
+
+The `cluster-issuer-dns.yaml` tells cert-manager to use Let's Encrypt production + Cloudflare DNS-01:
+```yaml
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-dns
+spec:
+  acme:
+    email: lyhuavanly@gmail.com
+    server: https://acme-v02.api.letsencrypt.org/directory
+    privateKeySecretRef:
+      name: letsencrypt-dns
+    solvers:
+      - dns01:
+          cloudflare:
+            apiTokenSecretRef:
+              name: cloudflare-api-token
+              key: api-token
+```
+
+**Request the certificate** (cert-manager will auto-create the `visign-tls` Secret):
+```bash
+kubectl apply -f - <<EOF
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: visign-tls
+  namespace: visign
+spec:
+  secretName: visign-tls
+  issuerRef:
+    name: letsencrypt-dns
+    kind: ClusterIssuer
+  dnsNames:
+    - lyhua.dpdns.org
+EOF
+
+# Watch until Ready = True (takes 1-3 minutes)
+kubectl get certificate -n visign visign-tls -w
+```
+
+Once `Ready = True`, the `visign-tls` Secret exists → AGC Gateway can terminate TLS.
+Cert-manager auto-renews every ~60 days.
+
+**Cloudflare DNS setup:**
+- In Cloudflare DNS, add an **A record**: name `@`, value = AGC frontend public IP, **Proxied** ✅
+- SSL/TLS mode: **Full** (not Strict, since Let's Encrypt is the cert on AGC side)
+
 ### 6C. Install ArgoCD into AKS
+
+Recommended path:
+
+- Follow the ArgoCD installation flow documented in [README(3).md](README(3).md#L367) Step 3 and Step 4.
+- Use this guide's commands below as the direct/CLI equivalent.
 
 ```bash
 kubectl create namespace argocd
@@ -1258,6 +1401,14 @@ argocd login localhost:8080 --username admin --password "$ARGOCD_PASSWORD" --ins
 Open UI: `https://localhost:8080`
 
 ### 6E. Create ArgoCD application (`k8s-specifications/argocd-application.yaml`)
+
+Recommended:
+
+- Create the ArgoCD application from ArgoCD UI as shown in [README(3).md](README(3).md#L475).
+
+Not recommended (but supported):
+
+- Create application by committing and applying a raw Argo Application YAML.
 
 ```yaml
 apiVersion: argoproj.io/v1alpha1
@@ -1293,6 +1444,35 @@ From this point onward:
 
 1. GitHub Actions does CI only (build + push + manifest tag commit).
 2. ArgoCD does CD only (pull + reconcile into AKS).
+
+### 6G. HTTPS Verification Runbook
+
+```bash
+# 1) Gateway and HTTPRoute status
+kubectl get gateway -n visign visign-gateway
+kubectl get httproute -n visign
+
+# 2) cert-manager certificate status
+kubectl get certificate -n visign visign-tls
+
+# 3) AGC frontend public IP
+kubectl get gateway -n visign visign-gateway -o jsonpath='{.status.addresses[*].value}'
+
+# 4) DNS resolves to AGC IP
+nslookup lyhua.dpdns.org
+
+# 5) HTTPS reachability
+# Windows
+Test-NetConnection lyhua.dpdns.org -Port 443
+# Linux/macOS
+curl -v --connect-timeout 10 https://lyhua.dpdns.org
+```
+
+Interpretation:
+- Gateway has no address → ALB controller not reconciled. Check: `kubectl logs -n azure-alb-system -l app=alb-controller`
+- Certificate `Ready = False` → check: `kubectl describe certificate -n visign visign-tls` and `kubectl get challenges -n visign`
+- DNS wrong → update Cloudflare A record to AGC IP
+- HTTPS fails but DNS correct → verify `visign-tls` Secret exists: `kubectl get secret -n visign visign-tls`
 
 ---
 
@@ -1343,59 +1523,7 @@ For `visign-web`, Next.js doesn't natively expose Prometheus metrics, but Promet
 
 ### 7C. Install Prometheus + Grafana via Helm
 
-Create `monitoring/prometheus-values.yaml`:
-
-```yaml
-prometheus:
-  prometheusSpec:
-    serviceMonitorSelectorNilUsesHelmValues: false
-    podMonitorSelectorNilUsesHelmValues: false
-    additionalScrapeConfigs:
-      - job_name: 'visign-ai-pods'
-        kubernetes_sd_configs:
-          - role: pod
-            namespaces:
-              names:
-                - visign
-        relabel_configs:
-          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
-            action: keep
-            regex: true
-          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
-            action: replace
-            target_label: __metrics_path__
-            regex: (.+)
-          - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
-            action: replace
-            regex: ([^:]+)(?::\d+)?;(\d+)
-            replacement: $1:$2
-            target_label: __address__
-          - source_labels: [__meta_kubernetes_pod_label_app]
-            action: replace
-            target_label: app
-
-grafana:
-  adminPassword: "visign-admin-2024"
-  service:
-    type: LoadBalancer
-  dashboardProviders:
-    dashboardproviders.yaml:
-      apiVersion: 1
-      providers:
-        - name: 'default'
-          orgId: 1
-          folder: ''
-          type: file
-          disableDeletion: false
-          editable: true
-          options:
-            path: /var/lib/grafana/dashboards/default
-
-alertmanager:
-  enabled: true
-```
-
-**Install:**
+Recommended (private access, no public Grafana, no custom values file required):
 
 ```bash
 # Add Helm repo
@@ -1404,17 +1532,39 @@ helm repo update
 
 # Install kube-prometheus-stack (includes Prometheus + Grafana + AlertManager)
 helm install monitoring prometheus-community/kube-prometheus-stack \
-  --namespace monitoring --create-namespace \
-  --values monitoring/prometheus-values.yaml \
-  --set grafana.service.type=LoadBalancer
+  --namespace monitoring --create-namespace
 
 # Wait for everything to be ready
 kubectl get pods -n monitoring --watch
 
-# Get Grafana external IP
-kubectl get svc -n monitoring monitoring-grafana
-# Login: admin / visign-admin-2024
+# Access Grafana privately (like ArgoCD)
+kubectl -n monitoring port-forward svc/monitoring-grafana 3000:80
+
+# In another terminal, fetch generated credentials from secret
+GRAFANA_USER=$(kubectl -n monitoring get secret monitoring-grafana -o jsonpath='{.data.admin-user}' | base64 -d)
+GRAFANA_PASSWORD=$(kubectl -n monitoring get secret monitoring-grafana -o jsonpath='{.data.admin-password}' | base64 -d)
+echo "$GRAFANA_USER"
+echo "$GRAFANA_PASSWORD"
 ```
+
+Open: `http://localhost:3000`
+
+Security guidance:
+
+- Do not expose Grafana as `LoadBalancer` in normal setups.
+- Use port-forward access for admin work.
+- Rotate the admin password immediately after first login.
+
+If Grafana was previously exposed publicly, force it back to private service type:
+
+```bash
+kubectl patch svc -n monitoring monitoring-grafana -p '{"spec":{"type":"ClusterIP"}}'
+```
+
+Not recommended (advanced/manual):
+
+- Installing with custom YAML values for Grafana exposure/password unless you have a specific audited reason.
+- If you still need custom settings, keep them in `monitoring/prometheus-values.yaml` and keep Grafana service type as `ClusterIP`.
 
 ### 7D. Grafana Dashboard Setup
 
@@ -1437,6 +1587,133 @@ Grafana has built-in alerts. Set up these basic ones:
 - **Pod CrashLooping:** Alert when `kube_pod_container_status_restarts_total` increases rapidly
 - **High CPU:** Alert when pod CPU usage > 80% for 5 minutes
 - **Pod Not Ready:** Alert when `kube_pod_status_ready{namespace="visign"}` = 0
+
+---
+
+## Appendix A (Optional): HTTPS/TLS Setup
+
+Use this appendix only if you want public HTTPS and certificate automation.
+
+### A.1 Ingress TLS annotations and TLS block
+
+Update `k8s-specifications/ingress.yaml` to include:
+
+```yaml
+metadata:
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    acme.cert-manager.io/http01-edit-in-place: "true"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+spec:
+  tls:
+    - hosts:
+        - app.yourdomain.com
+      secretName: visign-tls
+```
+
+Use a real domain (for example `app.yourdomain.com`) that points to your ingress public IP.
+Avoid using `nip.io` or raw IP for production TLS issuance.
+
+### A.2 HTTPS preflight checks
+
+Run these checks in order. If any step fails, stop and fix before waiting for cert-manager retries.
+
+```bash
+# 1) Confirm ingress has a public IP
+kubectl get svc -n ingress-nginx ingress-nginx-controller -o wide
+
+# 2) Confirm your host resolves to that same IP
+nslookup app.yourdomain.com
+
+# 3) Confirm public HTTP reachability from an external network
+# (not from inside cluster)
+curl -I http://app.yourdomain.com
+
+# 4) Confirm cert-manager stack is healthy
+kubectl get pods -n cert-manager
+kubectl get clusterissuer letsencrypt-prod
+```
+
+If step 3 times out, do not continue with HTTP-01. Move to DNS-01 in section A.4.
+
+### A.3 HTTP-01 ClusterIssuer manifest
+
+`k8s-specifications/cluster-issuer.yaml`:
+
+```yaml
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    email: your-email@example.com
+    server: https://acme-v02.api.letsencrypt.org/directory
+    privateKeySecretRef:
+      name: letsencrypt-prod
+    solvers:
+      - http01:
+          ingress:
+            class: nginx
+```
+
+### A.4 DNS-01 ClusterIssuer fallback (Cloudflare)
+
+Use DNS-01 when Let's Encrypt cannot connect to your ingress public IP on port 80.
+This avoids network-path dependency on HTTP reachability.
+
+`k8s-specifications/cluster-issuer-dns.yaml`:
+
+```yaml
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-dns
+spec:
+  acme:
+    email: your-email@example.com
+    server: https://acme-v02.api.letsencrypt.org/directory
+    privateKeySecretRef:
+      name: letsencrypt-dns
+    solvers:
+      - dns01:
+          cloudflare:
+            apiTokenSecretRef:
+              name: cloudflare-api-token
+              key: api-token
+```
+
+Create Cloudflare token secret:
+
+```bash
+kubectl create secret generic cloudflare-api-token \
+  -n cert-manager \
+  --from-literal=api-token='<CLOUDFLARE_API_TOKEN>'
+
+kubectl apply -f k8s-specifications/cluster-issuer-dns.yaml
+```
+
+Then update ingress annotation to use DNS issuer:
+
+```yaml
+cert-manager.io/cluster-issuer: "letsencrypt-dns"
+```
+
+Re-issue certificate:
+
+```bash
+kubectl delete certificate -n visign visign-tls
+kubectl delete secret -n visign visign-tls --ignore-not-found
+kubectl apply -f k8s-specifications/ingress.yaml
+kubectl get certificate,order,challenge -n visign -w
+```
+
+Cloudflare API token usage:
+
+- Stored as Kubernetes Secret `cloudflare-api-token` in namespace `cert-manager`.
+- Read by cert-manager only during ACME DNS-01 challenge.
+- Not read by `visign-web` or `visign-ai` application pods.
 
 ---
 
@@ -1485,3 +1762,4 @@ Stage 7: Install kube-prometheus-stack and configure Grafana dashboards/alerts.
 | AI build times out downloading CUDA wheels | Install CPU-only torch from `https://download.pytorch.org/whl/cpu` and use runtime-only requirements |
 | `No database connection string was provided to neon()` during `npm run build` | Ensure `DATABASE_URL` exists in repo-root `.env` before running `docker compose build` |
 | `/docs` shows Swagger but fails `Not Found /openapi.json` | In ingress, route `/openapi.json` to `visign-ai:8000` and keep `/api` routed to `visign-web:3000` |
+| `Error accepting authorization ... Timeout during connect (likely firewall problem)` from cert-manager | HTTP-01 cannot reach your ingress on port 80. Run **Appendix A.2** preflight checks. If public HTTP is not reachable, switch to **Appendix A.4 DNS-01** with a real domain and re-issue the certificate. |

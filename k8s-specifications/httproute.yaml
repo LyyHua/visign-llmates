@@ -1,0 +1,88 @@
+---
+# Gateway — references the AGC frontend listener created in the Azure Portal
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: visign-gateway
+  namespace: visign
+  annotations:
+    alb.networking.azure.io/alb-namespace: azure-alb-system
+    alb.networking.azure.io/alb-name: visign-agc        # matches the AGC resource name you create in Portal
+spec:
+  gatewayClassName: azure-alb-external
+  listeners:
+    # HTTP listener — redirects to HTTPS
+    - name: http
+      port: 80
+      protocol: HTTP
+      allowedRoutes:
+        namespaces:
+          from: Same
+    # HTTPS listener — TLS terminated at AGC with your Cloudflare-issued cert
+    - name: https
+      port: 443
+      protocol: HTTPS
+      allowedRoutes:
+        namespaces:
+          from: Same
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: visign-tls         # K8s Secret holding your TLS cert+key (created in Stage 6C)
+            namespace: visign
+---
+# Redirect HTTP → HTTPS
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: visign-http-redirect
+  namespace: visign
+spec:
+  parentRefs:
+    - name: visign-gateway
+      sectionName: http
+  rules:
+    - filters:
+        - type: RequestRedirect
+          requestRedirect:
+            scheme: https
+            statusCode: 301
+---
+# Main HTTPS routes
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: visign-https-routes
+  namespace: visign
+spec:
+  parentRefs:
+    - name: visign-gateway
+      sectionName: https
+  hostnames:
+    - "lyhua.dpdns.org"           # your domain — update if domain changes
+  rules:
+    # AI service routes
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/ai
+        - path:
+            type: PathPrefix
+            value: /openapi.json
+        - path:
+            type: PathPrefix
+            value: /docs
+        - path:
+            type: PathPrefix
+            value: /redoc
+      backendRefs:
+        - name: visign-ai
+          port: 8000
+    # Web service catch-all
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: visign-web
+          port: 3000

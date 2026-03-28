@@ -4,7 +4,7 @@ metadata:
   name: letsencrypt-dns
 spec:
   acme:
-    email: 23520906@ms.uit.edu.vn
+    email: lyhuavanly@gmail.com
     server: https://acme-v02.api.letsencrypt.org/directory
     privateKeySecretRef:
       name: letsencrypt-dns
