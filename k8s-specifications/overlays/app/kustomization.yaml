@@ -15,6 +15,6 @@ resources:
 
 images:
 - name: visignacrftll4r7kkywwy.azurecr.io/visign-ai
-  newTag: dev-PLACEHOLDER
+  newTag: 3439bb10af2602d5db4688dc452cd2b79718e32b
 - name: visignacrftll4r7kkywwy.azurecr.io/visign-web
-  newTag: dev-PLACEHOLDER
+  newTag: 3439bb10af2602d5db4688dc452cd2b79718e32b
