@@ -70,7 +70,7 @@ jobs:
           docker buildx bake --file docker-compose.yml "${{ inputs.service }}" \
             --set "${{ inputs.service }}.cache-from=type=gha,scope=${{ inputs.image-name }}" \
             --set "${{ inputs.service }}.cache-to=type=gha,mode=max,scope=${{ inputs.image-name }}" \
-            --set "${{ inputs.service }}.output=type=docker"
+            --set "${{ inputs.service }}.output=type=docker,name=${{ inputs.local-image }}"
           docker image inspect "${{ inputs.local-image }}" > /dev/null
 
       - name: Login to ACR
