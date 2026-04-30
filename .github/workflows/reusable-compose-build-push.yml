@@ -64,23 +64,14 @@ jobs:
               fi
               ;;
             web)
-              if [ "${{ inputs.push-images }}" = "true" ]; then
-                cat > .env <<'EOF'
-                TORCH_COMPUTE=cpu
-                DATABASE_URL=${{ secrets.DATABASE_URL }}
-                OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
-                NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
-                CLERK_SECRET_KEY=${{ secrets.CLERK_SECRET_KEY }}
-                EOF
-              else
-                cat > .env <<'EOF'
-                TORCH_COMPUTE=cpu
-                DATABASE_URL=postgres://dummy:dummy@localhost:5432/dummy
-                OPENAI_API_KEY=dummy-for-web-build
-                NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=dummy-for-web-build
-                CLERK_SECRET_KEY=dummy-for-web-build
-                EOF
-              fi
+              # Always use dummy values - real secrets injected at runtime via Key Vault CSI driver
+              cat > .env <<'EOF'
+              TORCH_COMPUTE=cpu
+              DATABASE_URL=postgres://dummy:dummy@localhost:5432/dummy
+              OPENAI_API_KEY=dummy-for-web-build
+              NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=dummy-for-web-build
+              CLERK_SECRET_KEY=dummy-for-web-build
+              EOF
               ;;
             *)
               echo "Unsupported env profile: ${{ inputs.env-profile }}" >&2
@@ -141,7 +132,7 @@ jobs:
               exit 0
             fi
             git add "$KUSTOMIZE_FILE"
-            git commit -m "chore(images): update ${{ inputs.image-name }} to ${IMAGE_TAG} [skip ci]"
+            git commit -m "chore(images): update ${{ inputs.image-name }} to ${IMAGE_TAG} [[skip ci](file:///mnt/D65E6F605E6F37FF/What%20have%20i%20gotten%20myself%20into/visign-llmates/app/frontend/node_modules/caniuse-lite/data/features.js#L7351-L7351)]"
             git push origin "${GITHUB_REF_NAME}"
             echo "Updated $KUSTOMIZE_FILE"
           else
