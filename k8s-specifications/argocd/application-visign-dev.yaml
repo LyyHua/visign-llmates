@@ -1,0 +1,22 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: visign-dev
+  namespace: argocd
+  # Note: ArgoCD Image Updater annotations removed - using manual CI updates only
+  # To enable auto-updates, install ArgoCD Image Updater component first
+spec:
+  project: visign
+  source:
+    repoURL: https://github.com/LyyHua/visign-llmates
+    targetRevision: dev
+    path: k8s-specifications/overlays/dev
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: visign-dev
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

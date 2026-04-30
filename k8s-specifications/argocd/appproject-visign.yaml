@@ -1,0 +1,15 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: visign
+  namespace: argocd
+spec:
+  description: Visign project for dev and prod GitOps applications.
+  sourceRepos:
+    - https://github.com/LyyHua/visign-llmates
+  destinations:
+    - namespace: visign
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+    - group: '*'
+      kind: '*'

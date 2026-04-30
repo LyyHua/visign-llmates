@@ -1,0 +1,54 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: visign-ingress
+  namespace: visign
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - lyhua.dpdns.org
+      secretName: visign-tls
+  rules:
+    - host: lyhua.dpdns.org
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: visign-ai
+                port:
+                  number: 8000
+          - path: /openapi.json
+            pathType: Prefix
+            backend:
+              service:
+                name: visign-ai
+                port:
+                  number: 8000
+          - path: /docs
+            pathType: Prefix
+            backend:
+              service:
+                name: visign-ai
+                port:
+                  number: 8000
+          - path: /redoc
+            pathType: Prefix
+            backend:
+              service:
+                name: visign-ai
+                port:
+                  number: 8000
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: visign-web
+                port:
+                  number: 3000

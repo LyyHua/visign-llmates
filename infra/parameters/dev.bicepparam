@@ -1,9 +1,10 @@
-using './main.subscription.bicep'
+using '../main.subscription.bicep'
 
 param environment = 'dev'
 param resourceGroupName = 'visign-rg'
 param projectName = 'visign'
 param location = 'southeastasia'
+
 param aksNodeCount = 2
 param aksNodeVMSize = 'Standard_B2s'
 param aksAvailabilityZones = [
@@ -12,5 +13,6 @@ param aksAvailabilityZones = [
 ]
 param aksAutoScaleMin = 1
 param aksAutoScaleMax = 4
+
 param acrSku = 'Basic'
 param keyVaultSoftDeleteDays = 7

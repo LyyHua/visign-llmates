@@ -10,6 +10,9 @@ param aksKubeletIdentityObjectId string
 @description('Tenant ID')
 param tenantId string = subscription().tenantId
 
+@description('Soft delete retention in days')
+param softDeleteRetentionDays int = 7
+
 resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
   name: keyVaultName
   location: location
@@ -21,7 +24,7 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
     tenantId: tenantId
     enableRbacAuthorization: true
     enableSoftDelete: true
-    softDeleteRetentionInDays: 7
+    softDeleteRetentionInDays: softDeleteRetentionDays
     enabledForDeployment: false
     enabledForDiskEncryption: false
     enabledForTemplateDeployment: false

@@ -24,7 +24,17 @@ RUN pip install --no-cache-dir --upgrade pip && \
 COPY requirements.runtime.txt .
 RUN pip install --no-cache-dir --default-timeout=120 -r requirements.runtime.txt
 
+# Create a non-privileged user
+RUN adduser --disabled-password --gecos '' appuser
+
+# Copy application code
 COPY . .
+
+# Change ownership of app files to non-privileged user
+RUN chown -R appuser: /app
+
+# Switch to non-privileged user
+USER appuser
 
 EXPOSE 8000
 

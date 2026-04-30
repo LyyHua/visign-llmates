@@ -13,6 +13,12 @@ param nodeVMSize string = 'Standard_B2s'
 @description('Availability zones for AKS system node pool')
 param nodeAvailabilityZones array
 
+@description('Autoscale minimum node count')
+param autoScaleMin int = 1
+
+@description('Autoscale maximum node count')
+param autoScaleMax int = 4
+
 @description('ACR ID to attach')
 param acrId string
 
@@ -33,8 +39,8 @@ resource aks 'Microsoft.ContainerService/managedClusters@2024-01-01' = {
         mode: 'System'
         availabilityZones: nodeAvailabilityZones
         enableAutoScaling: true
-        minCount: 2
-        maxCount: 4
+        minCount: autoScaleMin
+        maxCount: autoScaleMax
         maxPods: 110
       }
     ]

@@ -4,11 +4,19 @@ param acrName string
 @description('Location for the registry')
 param location string
 
+@description('Azure Container Registry SKU')
+@allowed([
+  'Basic'
+  'Standard'
+  'Premium'
+])
+param acrSku string = 'Basic'
+
 resource acr 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
   name: acrName
   location: location
   sku: {
-    name: 'Basic'
+    name: acrSku
   }
   properties: {
     adminUserEnabled: true
