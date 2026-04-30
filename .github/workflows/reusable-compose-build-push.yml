@@ -47,13 +47,13 @@ jobs:
             echo "TORCH_COMPUTE=cpu" > .env
             echo "DATABASE_URL=dummy-for-ai-build" >> .env
             echo "OPENAI_API_KEY=dummy-for-ai-build" >> .env
-            echo "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_dummy_placeholder_12345" >> .env
+            echo "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}" >> .env
             echo "CLERK_SECRET_KEY=dummy-for-ai-build" >> .env
           elif [ "${{ inputs.env-profile }}" = "web" ]; then
             echo "TORCH_COMPUTE=cpu" > .env
             echo "DATABASE_URL=postgres://dummy:dummy@localhost:5432/dummy" >> .env
             echo "OPENAI_API_KEY=dummy-for-web-build" >> .env
-            echo "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_dummy_placeholder_12345" >> .env
+            echo "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}" >> .env
             echo "CLERK_SECRET_KEY=dummy-for-web-build" >> .env
           else
             echo "Unsupported env profile: ${{ inputs.env-profile }}" >&2
