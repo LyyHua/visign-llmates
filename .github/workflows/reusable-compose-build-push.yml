@@ -43,41 +43,22 @@ jobs:
       - name: Write build env file
         run: |
           set -euo pipefail
-          case "${{ inputs.env-profile }}" in
-            ai)
-              if [ "${{ inputs.push-images }}" = "true" ]; then
-                cat > .env <<'EOF'
-                TORCH_COMPUTE=${{ secrets.TORCH_COMPUTE }}
-                DATABASE_URL=dummy-for-ai-build
-                OPENAI_API_KEY=dummy-for-ai-build
-                NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=dummy-for-ai-build
-                CLERK_SECRET_KEY=dummy-for-ai-build
-                EOF
-              else
-                cat > .env <<'EOF'
-                TORCH_COMPUTE=cpu
-                DATABASE_URL=dummy-for-ai-build
-                OPENAI_API_KEY=dummy-for-ai-build
-                NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=dummy-for-ai-build
-                CLERK_SECRET_KEY=dummy-for-ai-build
-                EOF
-              fi
-              ;;
-            web)
-              # Always use dummy values - real secrets injected at runtime via Key Vault CSI driver
-              cat > .env <<'EOF'
-              TORCH_COMPUTE=cpu
-              DATABASE_URL=postgres://dummy:dummy@localhost:5432/dummy
-              OPENAI_API_KEY=dummy-for-web-build
-              NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=dummy-for-web-build
-              CLERK_SECRET_KEY=dummy-for-web-build
-              EOF
-              ;;
-            *)
-              echo "Unsupported env profile: ${{ inputs.env-profile }}" >&2
-              exit 1
-              ;;
-          esac
+          if [ "${{ inputs.env-profile }}" = "ai" ]; then
+            echo "TORCH_COMPUTE=cpu" > .env
+            echo "DATABASE_URL=dummy-for-ai-build" >> .env
+            echo "OPENAI_API_KEY=dummy-for-ai-build" >> .env
+            echo "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=dummy-for-ai-build" >> .env
+            echo "CLERK_SECRET_KEY=dummy-for-ai-build" >> .env
+          elif [ "${{ inputs.env-profile }}" = "web" ]; then
+            echo "TORCH_COMPUTE=cpu" > .env
+            echo "DATABASE_URL=postgres://dummy:dummy@localhost:5432/dummy" >> .env
+            echo "OPENAI_API_KEY=dummy-for-web-build" >> .env
+            echo "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=dummy-for-web-build" >> .env
+            echo "CLERK_SECRET_KEY=dummy-for-web-build" >> .env
+          else
+            echo "Unsupported env profile: ${{ inputs.env-profile }}" >&2
+            exit 1
+          fi
 
       - name: Build image with Buildx bake cache
         env:
@@ -132,7 +113,7 @@ jobs:
               exit 0
             fi
             git add "$KUSTOMIZE_FILE"
-            git commit -m "chore(images): update ${{ inputs.image-name }} to ${IMAGE_TAG} [[skip ci](file:///mnt/D65E6F605E6F37FF/What%20have%20i%20gotten%20myself%20into/visign-llmates/app/frontend/node_modules/caniuse-lite/data/features.js#L7351-L7351)]"
+            git commit -m "chore(images): update ${{ inputs.image-name }} to ${IMAGE_TAG} [skip ci]"
             git push origin "${GITHUB_REF_NAME}"
             echo "Updated $KUSTOMIZE_FILE"
           else
