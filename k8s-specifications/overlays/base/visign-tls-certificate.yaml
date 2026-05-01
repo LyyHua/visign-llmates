@@ -2,7 +2,6 @@ apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
   name: visign-tls
-  namespace: visign
 spec:
   secretName: visign-tls
   issuerRef:
