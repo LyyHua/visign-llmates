@@ -4,7 +4,9 @@ namespace: visign-dev
 resources:
 - ../base
 images:
-- name: visign-ai
-  newTag: ""
-- name: visign-web
-  newTag: ""
+- name: visignacrftll4r7kkywwy.azurecr.io/visign-ai
+  newName: visigndacrftll4r7kkywwy.azurecr.io/visign-ai
+  newTag: 3439bb10af2602d5db4688dc452cd2b79718e32b
+- name: visignacrftll4r7kkywwy.azurecr.io/visign-web
+  newName: visigndacrftll4r7kkywwy.azurecr.io/visign-web
+  newTag: 3439bb10af2602d5db4688dc452cd2b79718e32b
