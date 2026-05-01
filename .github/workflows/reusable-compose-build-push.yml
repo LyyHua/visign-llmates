@@ -77,9 +77,9 @@ jobs:
         if: inputs.push-images
         uses: azure/docker-login@v1
         with:
-          login-server: ${{ secrets.ACR_LOGIN_SERVER }}
-          username: ${{ secrets.ACR_USERNAME }}
-          password: ${{ secrets.ACR_PASSWORD }}
+          login-server: ${{ github.ref_name == 'dev' && secrets.DEV_ACR_LOGIN_SERVER || secrets.PROD_ACR_LOGIN_SERVER }}
+          username: ${{ github.ref_name == 'dev' && secrets.DEV_ACR_USERNAME || secrets.PROD_ACR_USERNAME }}
+          password: ${{ github.ref_name == 'dev' && secrets.DEV_ACR_PASSWORD || secrets.PROD_ACR_PASSWORD }}
 
       - name: Tag and push image
         if: inputs.push-images
@@ -87,7 +87,7 @@ jobs:
           set -euo pipefail
           SAFE_BRANCH="${GITHUB_REF_NAME//\//-}"
           IMAGE_TAG="${SAFE_BRANCH}-${GITHUB_SHA}"
-          IMAGE_REF="${{ secrets.ACR_LOGIN_SERVER }}/${{ inputs.image-name }}:${IMAGE_TAG}"
+          IMAGE_REF="${{ github.ref_name == 'dev' && secrets.DEV_ACR_LOGIN_SERVER || secrets.PROD_ACR_LOGIN_SERVER }}/${{ inputs.image-name }}:${IMAGE_TAG}"
           docker tag "${{ inputs.local-image }}" "${IMAGE_REF}"
           docker push "${IMAGE_REF}"
           echo "image-tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
@@ -100,7 +100,7 @@ jobs:
           if [ "${GITHUB_REF_NAME}" = "dev" ]; then
             KUSTOMIZE_FILE="k8s-specifications/overlays/dev/kustomization.yaml"
           else
-            KUSTOMIZE_FILE="k8s-specifications/overlays/app/kustomization.yaml"
+            KUSTOMIZE_FILE="k8s-specifications/overlays/prod/kustomization.yaml"
           fi
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git config --global user.name "github-actions[bot]"

@@ -11,6 +11,8 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
+# Copy dependencies from deps stage
+COPY --from=deps /app/node_modules ./node_modules
 # Copy only necessary source files for build (exclude .next, node_modules via .dockerignore)
 COPY public ./public
 COPY app ./app

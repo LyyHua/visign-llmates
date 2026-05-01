@@ -5,14 +5,14 @@ on:
   push:
     branches: [dev, main]
     paths:
-      - "visign/**"
+      - "visign-llmates/**"
       - "docker-compose.yml"
       - ".github/workflows/ci-cd-web.yml"
       - ".github/workflows/reusable-compose-build-push.yml"
   pull_request:
     branches: [dev, main]
     paths:
-      - "visign/**"
+      - "visign-llmates/**"
       - "docker-compose.yml"
       - ".github/workflows/ci-cd-web.yml"
       - ".github/workflows/reusable-compose-build-push.yml"
@@ -28,9 +28,9 @@ jobs:
   build-and-push:
     uses: ./.github/workflows/reusable-compose-build-push.yml
     with:
-      service: nextjs
+      service: web
       image-name: visign-web
-      local-image: visign-llmates-nextjs:latest
+      local-image: visign-llmates-web:latest
       env-profile: web
-      push-images: ${{ github.event_name != 'pull_request' && github.ref_name == 'dev' }}
+      push-images: ${{ github.event_name != 'pull_request' }}
     secrets: inherit
