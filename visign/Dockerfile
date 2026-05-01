@@ -11,10 +11,6 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Copy deps with dev dependencies for build
-COPY --from=deps /app/node_modules ./node_modules
-COPY package.json package-lock.json ./
-
 # Copy only necessary source files for build (exclude .next, node_modules via .dockerignore)
 COPY public ./public
 COPY app ./app
@@ -56,9 +52,6 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV HOSTNAME=0.0.0.0
-
-RUN addgroup --system --gid 1001 nodejs && \
-    adduser --system --uid 1001 nextjs
 
 # Copy built assets from builder
 COPY --from=builder /app/public ./public

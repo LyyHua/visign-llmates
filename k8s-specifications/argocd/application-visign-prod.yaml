@@ -4,10 +4,10 @@ metadata:
   name: visign-prod
   namespace: argocd
 spec:
-  project: visign
+  project: prod-project
   source:
     repoURL: https://github.com/LyyHua/visign-llmates
-    targetRevision: main
+    targetRevision: HEAD
     path: k8s-specifications/overlays/app
   destination:
     server: https://kubernetes.default.svc

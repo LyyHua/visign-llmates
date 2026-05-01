@@ -1,20 +1,31 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
+namespace: visign-prod
 
 resources:
-- namespace.yaml
-- cluster-role.yaml
-- secrets-provider.yaml
-- visign-ai-deployment.yaml
-- visign-ai-service.yaml
-- visign-web-deployment.yaml
-- visign-web-service.yaml
-- ingress.yaml
-- cluster-issuer-dns.yaml
-- visign-tls-certificate.yaml
+- ../base
 
-images:
-- name: visignacrftll4r7kkywwy.azurecr.io/visign-ai
-  newTag: 3439bb10af2602d5db4688dc452cd2b79718e32b
-- name: visignacrftll4r7kkywwy.azurecr.io/visign-web
-  newTag: 3439bb10af2602d5db4688dc452cd2b79718e32b
+commonLabels:
+  environment: prod
+
+patches:
+- target:
+    kind: Deployment
+    name: visign-ai
+  patch: |-
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: visign-ai
+    spec:
+      replicas: 2
+- target:
+    kind: Deployment
+    name: visign-web
+  patch: |-
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: visign-web
+    spec:
+      replicas: 2

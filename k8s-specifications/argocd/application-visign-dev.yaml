@@ -3,13 +3,11 @@ kind: Application
 metadata:
   name: visign-dev
   namespace: argocd
-  # Note: ArgoCD Image Updater annotations removed - using manual CI updates only
-  # To enable auto-updates, install ArgoCD Image Updater component first
 spec:
-  project: visign
+  project: dev-project
   source:
     repoURL: https://github.com/LyyHua/visign-llmates
-    targetRevision: dev
+    targetRevision: HEAD
     path: k8s-specifications/overlays/dev
   destination:
     server: https://kubernetes.default.svc
