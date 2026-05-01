@@ -28,9 +28,9 @@ jobs:
   build-and-push:
     uses: ./.github/workflows/reusable-compose-build-push.yml
     with:
-      service: ai
+      service: fastapi
       image-name: visign-ai
-      local-image: visign-llmates-ai:latest
+      local-image: visign-llmates-fastapi:latest
       env-profile: ai
       push-images: ${{ github.event_name != 'pull_request' }}
     secrets: inherit

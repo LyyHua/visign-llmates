@@ -28,9 +28,9 @@ jobs:
   build-and-push:
     uses: ./.github/workflows/reusable-compose-build-push.yml
     with:
-      service: web
+      service: nextjs
       image-name: visign-web
-      local-image: visign-llmates-web:latest
+      local-image: visign-llmates-nextjs:latest
       env-profile: web
       push-images: ${{ github.event_name != 'pull_request' }}
     secrets: inherit
