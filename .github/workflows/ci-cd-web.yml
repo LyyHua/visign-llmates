@@ -18,7 +18,7 @@ on:
       - ".github/workflows/reusable-compose-build-push.yml"
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: ci-web-${{ github.ref }}
