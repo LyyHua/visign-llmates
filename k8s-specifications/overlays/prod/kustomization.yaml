@@ -3,6 +3,7 @@ kind: Kustomization
 namespace: visign-prod
 resources:
 - ../base
+- secret-provider.yaml
 images:
 - name: visignacrftll4r7kkywwy.azurecr.io/visign-ai
   newName: visignpacrftll4r7kkywwy.azurecr.io/visign-ai

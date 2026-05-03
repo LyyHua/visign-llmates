@@ -7,7 +7,7 @@ spec:
   project: dev-project
   source:
     repoURL: https://github.com/LyyHua/visign-llmates
-    targetRevision: HEAD
+    targetRevision: dev
     path: k8s-specifications/overlays/dev
   destination:
     server: https://kubernetes.default.svc

@@ -1,0 +1,14 @@
+{
+  "experimentalFeaturesEnabled": {
+    "resourceTypedParamsAndOutputs": false
+  },
+  "analyzers": {
+    "core": {
+      "rules": {
+        "bcp036": {
+          "level": "none"
+        }
+      }
+    }
+  }
+}
