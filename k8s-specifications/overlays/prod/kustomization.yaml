@@ -4,6 +4,8 @@ namespace: visign-prod
 resources:
   - ../base
   - secrets-provider.yaml
+  - ingress.yaml
+  - cluster-issuer-dns.yaml
 images:
   - name: visignacrftll4r7kkywwy.azurecr.io/visign-ai
     newName: visignpacrftll4r7kkywwy.azurecr.io/visign-ai
