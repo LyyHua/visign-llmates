@@ -7,8 +7,8 @@ resources:
   - ingress.yaml
 images:
   - name: visignacrftll4r7kkywwy.azurecr.io/visign-ai
-    newName: visignpacrftll4r7kkywwy.azurecr.io/visign-ai
-    newTag: 3439bb10af2602d5db4688dc452cd2b79718e32b
+  newName: visignpacrftll4r7kkywwy.azurecr.io/visign-ai
+    newTag: 
   - name: visignacrftll4r7kkywwy.azurecr.io/visign-web
     newName: visignpacrftll4r7kkywwy.azurecr.io/visign-web
     newTag: 3439bb10af2602d5db4688dc452cd2b79718e32b
