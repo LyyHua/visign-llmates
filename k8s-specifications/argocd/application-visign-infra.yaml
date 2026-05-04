@@ -1,0 +1,17 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: visign-infra
+  namespace: argocd
+spec:
+  project: infra-project
+  source:
+    repoURL: https://github.com/LyyHua/visign-llmates
+    targetRevision: main
+    path: k8s-specifications/overlays/infra
+  destination:
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

@@ -37,6 +37,7 @@ export const SignDetection = ({
   const chunksRef = useRef<Blob[]>([]);
   const holisticRef = useRef<Holistic | null>(null);
   const animationFrameRef = useRef<number | null>(null);
+ const holisticAbortedRef = useRef(false);
 
   // Initialize MediaPipe Holistic (Pose + Hands + Face)
   const initializeHolistic = useCallback(() => {
@@ -114,23 +115,32 @@ export const SignDetection = ({
     holisticRef.current = holistic;
   }, []);
 
-  // Detect pose and hands continuously
-  const detectHolistic = useCallback(() => {
-    if (
-      videoRef.current &&
-      holisticRef.current &&
-      videoRef.current.readyState === 4
-    ) {
-      void holisticRef.current
-        .send({ image: videoRef.current })
-        .catch((error: unknown) => {
-          console.error("Error detecting holistic:", error);
-        });
-    }
+ // Detect pose and hands continuously
+ const detectHolistic = useCallback(() => {
+   if (holisticAbortedRef.current) return;
 
-    // Continue detection loop
-    animationFrameRef.current = requestAnimationFrame(detectHolistic);
-  }, []);
+   if (
+     videoRef.current &&
+     holisticRef.current &&
+     videoRef.current.readyState === 4
+   ) {
+     void holisticRef.current
+       .send({ image: videoRef.current })
+       .catch((error: unknown) => {
+         if (error instanceof Error && error.message.includes("Aborted")) {
+           holisticAbortedRef.current = true;
+           console.warn("MediaPipe Holistic WASM crashed — landmark overlay disabled");
+           return;
+         }
+         console.error("Error detecting holistic:", error);
+       });
+   }
+
+   // Continue detection loop only if not aborted
+   if (!holisticAbortedRef.current) {
+     animationFrameRef.current = requestAnimationFrame(detectHolistic);
+   }
+ }, []);
 
   const stopCamera = useCallback(() => {
     // Cancel animation frame

@@ -171,11 +171,19 @@ Go to **GitHub Repo → Settings → Secrets and variables → Actions** and add
 | `PROD_ACR_PASSWORD` | from script output |
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk publishable key |
 
+**Update Secrets Provider Configuration:**
+
+After running the script above, update the following files with the values shown:
+
+- `k8s-specifications/overlays/dev/secrets-provider.yaml`: Set `userAssignedIdentityID` and `tenantId` with CSI_CLIENT_ID and TENANT_ID values. Update `keyvaultName` with DEV_KV_NAME from script output.
+- `k8s-specifications/overlays/prod/secrets-provider.yaml`: Set `userAssignedIdentityID` and `tenantId` with CSI_CLIENT_ID and TENANT_ID values. Update `keyvaultName` with PROD_KV_NAME from script output.
+
+Commit and push to both `dev` and `main` branches.
 ---
 
 ## Stage 3: Populate Key Vault Secrets
 
-Run the following script to grant yourself access to both Key Vaults:
+Run the following consolidated script to grant yourself access, populate secrets, and verify:
 
 ```powershell
 $DEPLOYMENT_OUTPUTS = az deployment sub show `
@@ -198,35 +206,21 @@ az role assignment create `
   --role "Key Vault Secrets Officer" `
   --scope (az keyvault show --name $PROD_KV_NAME --query id -o tsv)
 
-Write-Host "DEV Key Vault : $DEV_KV_NAME"
-Write-Host "PROD Key Vault: $PROD_KV_NAME"
-```
+Write-Host "Waiting 120 seconds for RBAC propagation..."
+Start-Sleep -Seconds 120
 
-**Wait 1-5 minutes for RBAC to propagate before running the secret commands below.**
+az keyvault secret set --vault-name $DEV_KV_NAME --name "DATABASE-URL"          --value '<YOUR_DEV_DATABASE_URL>'
+az keyvault secret set --vault-name $DEV_KV_NAME --name "CLERK-PUBLISHABLE-KEY" --value '<YOUR_DEV_CLERK_PK>'
+az keyvault secret set --vault-name $DEV_KV_NAME --name "CLERK-SECRET-KEY"      --value '<YOUR_DEV_CLERK_SK>'
+az keyvault secret set --vault-name $DEV_KV_NAME --name "OPENAI-API-KEY"        --value '<YOUR_OPENAI_KEY>'
+az keyvault secret set --vault-name $DEV_KV_NAME --name "TORCH-COMPUTE"         --value 'cpu'
 
-### Add Secrets to DEV Key Vault
+az keyvault secret set --vault-name $PROD_KV_NAME --name "DATABASE-URL"          --value '<YOUR_PROD_DATABASE_URL>'
+az keyvault secret set --vault-name $PROD_KV_NAME --name "CLERK-PUBLISHABLE-KEY" --value '<YOUR_PROD_CLERK_PK>'
+az keyvault secret set --vault-name $PROD_KV_NAME --name "CLERK-SECRET-KEY"      --value '<YOUR_PROD_CLERK_SK>'
+az keyvault secret set --vault-name $PROD_KV_NAME --name "OPENAI-API-KEY"        --value '<YOUR_OPENAI_KEY>'
+az keyvault secret set --vault-name $PROD_KV_NAME --name "TORCH-COMPUTE"         --value 'gpu'
 
-```powershell
-az keyvault secret set --vault-name $DEV_KV_NAME --name "DATABASE-URL"        --value 'postgresql://user:pass@dev-host:5432/devdb?sslmode=require'
-az keyvault secret set --vault-name $DEV_KV_NAME --name "CLERK-PUBLISHABLE-KEY" --value 'pk_test_...'
-az keyvault secret set --vault-name $DEV_KV_NAME --name "CLERK-SECRET-KEY"    --value 'sk_test_...'
-az keyvault secret set --vault-name $DEV_KV_NAME --name "OPENAI-API-KEY"      --value 'sk-...'
-az keyvault secret set --vault-name $DEV_KV_NAME --name "TORCH-COMPUTE"       --value 'cpu'
-```
-
-### Add Secrets to PROD Key Vault
-
-```powershell
-az keyvault secret set --vault-name $PROD_KV_NAME --name "DATABASE-URL"         --value 'postgresql://user:pass@prod-host:5432/proddb?sslmode=require'
-az keyvault secret set --vault-name $PROD_KV_NAME --name "CLERK-PUBLISHABLE-KEY" --value 'pk_live_...'
-az keyvault secret set --vault-name $PROD_KV_NAME --name "CLERK-SECRET-KEY"     --value 'sk_live_...'
-az keyvault secret set --vault-name $PROD_KV_NAME --name "OPENAI-API-KEY"       --value 'sk-...'
-az keyvault secret set --vault-name $PROD_KV_NAME --name "TORCH-COMPUTE"        --value 'gpu'
-```
-
-### Verify Secrets
-
-```powershell
 az keyvault secret list --vault-name $DEV_KV_NAME  --query "[].name" -o table
 az keyvault secret list --vault-name $PROD_KV_NAME --query "[].name" -o table
 ```
@@ -355,12 +349,36 @@ kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/st
 
 ### Install ArgoCD AppProjects
 
-AppProjects must exist before applications. Apply both:
+AppProjects must exist before applications. Apply all three:
 
 ```powershell
 kubectl apply -f k8s-specifications/argocd/appproject-dev.yaml
 kubectl apply -f k8s-specifications/argocd/appproject-prod.yaml
+kubectl apply -f k8s-specifications/argocd/appproject-infra.yaml
 ```
+
+### Connect Repository (REQUIRED for private repos)
+
+For private repositories, ArgoCD needs credentials to access the Git repo. Connect it to both projects:
+
+```powershell
+argocd repo add https://github.com/LyyHua/visign-llmates `
+  --username <GITHUB_USERNAME> `
+  --password <GITHUB_PAT> `
+  --project dev-project
+
+argocd repo add https://github.com/LyyHua/visign-llmates `
+  --username <GITHUB_USERNAME> `
+  --password <GITHUB_PAT> `
+  --project prod-project
+
+argocd repo add https://github.com/LyyHua/visign-llmates `
+  --username <GITHUB_USERNAME> `
+  --password <GITHUB_PAT> `
+  --project infra-project
+```
+
+Skip this step if your repository is public.
 
 ### Port Forward ArgoCD (Student Accounts)
 
@@ -390,6 +408,7 @@ kubectl apply -f k8s-specifications/argocd/rbac-cm.yaml
 ```powershell
 argocd login localhost:8081 --username admin --password <YOUR_PASSWORD>
 
+kubectl apply -f k8s-specifications/argocd/application-visign-infra.yaml
 kubectl apply -f k8s-specifications/argocd/application-visign-dev.yaml
 kubectl apply -f k8s-specifications/argocd/application-visign-prod.yaml
 
@@ -401,6 +420,7 @@ argocd app list
 ```powershell
 argocd app get visign-dev
 argocd app get visign-prod
+argocd app get visign-infra
 
 kubectl get pods -n visign-dev
 kubectl get pods -n visign-prod

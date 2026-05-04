@@ -82,6 +82,7 @@ jobs:
           password: ${{ github.ref_name == 'dev' && secrets.DEV_ACR_PASSWORD || secrets.PROD_ACR_PASSWORD }}
 
       - name: Tag and push image
+        id: build-push
         if: inputs.push-images
         run: |
           set -euo pipefail
