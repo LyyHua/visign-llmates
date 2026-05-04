@@ -5,6 +5,25 @@ resources:
   - ../base
   - secrets-provider.yaml
   - ingress.yaml
+patches:
+  - target:
+      kind: Deployment
+      name: visign-web
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+      - op: remove
+        path: /spec/template/spec/topologySpreadConstraints
+  - target:
+      kind: Deployment
+      name: visign-ai
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+      - op: remove
+        path: /spec/template/spec/topologySpreadConstraints
 images:
   - name: visignacrftll4r7kkywwy.azurecr.io/visign-ai
     newName: visigndacrftll4r7kkywwy.azurecr.io/visign-ai

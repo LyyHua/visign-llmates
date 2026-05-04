@@ -93,12 +93,19 @@ jobs:
           docker push "${IMAGE_REF}"
           echo "image-tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
 
+      - name: Install yq
+        if: inputs.push-images && github.event_name != 'pull_request'
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
       - name: Update kustomization.yaml
         if: inputs.push-images && github.event_name != 'pull_request'
         run: |
           set -euo pipefail
           IMAGE_TAG="${{ steps.build-push.outputs.image-tag }}"
           ACR_LOGIN_SERVER="${{ github.ref_name == 'dev' && secrets.DEV_ACR_LOGIN_SERVER || secrets.PROD_ACR_LOGIN_SERVER }}"
+          IMAGE_NAME="${{ inputs.image-name }}"
 
           if [ "${GITHUB_REF_NAME}" = "dev" ]; then
             KUSTOMIZE_FILE="k8s-specifications/overlays/dev/kustomization.yaml"
@@ -110,40 +117,21 @@ jobs:
           git config --global user.name "github-actions[bot]"
 
           git fetch origin "${GITHUB_REF_NAME}"
-          git pull --rebase origin "${GITHUB_REF_NAME}" || true
+          git pull --rebase origin "${GITHUB_REF_NAME}"
 
-          # Update the newName (ACR login server + image name) and newTag
-          # Pattern: Look for "newName:" containing the image-name, then update next "newTag:"
-          awk -v acr="${ACR_LOGIN_SERVER}" -v img="${{ inputs.image-name }}" -v tag="${IMAGE_TAG}" '
-            BEGIN { found = 0 }
-            /newName:/ {
-              if ($0 ~ "newName:" && $(NF-1) ~ img "$" || $0 ~ "newName:.*" img "$") {
-                print "  newName: " acr "/" img
-                found = 1
-              } else {
-                print
-              }
-              next
-            }
-            /newTag:/ {
-              if (found) {
-                print "    newTag: " tag
-                found = 0
-              } else {
-                print
-              }
-              next
-            }
-            { print }
-          ' "$KUSTOMIZE_FILE" > "$KUSTOMIZE_FILE.tmp"
-          mv "$KUSTOMIZE_FILE.tmp" "$KUSTOMIZE_FILE"
+          # Use yq to find the image entry by name and update newName + newTag in-place
+          BASE_IMAGE_NAME="visignacrftll4r7kkywwy.azurecr.io/${IMAGE_NAME}"
+          yq e -i "
+            (.images[] | select(.name == \"${BASE_IMAGE_NAME}\") | .newName) = \"${ACR_LOGIN_SERVER}/${IMAGE_NAME}\" |
+            (.images[] | select(.name == \"${BASE_IMAGE_NAME}\") | .newTag) = \"${IMAGE_TAG}\"
+          " "${KUSTOMIZE_FILE}"
 
-          if git diff --quiet "$KUSTOMIZE_FILE"; then
+          if git diff --quiet "${KUSTOMIZE_FILE}"; then
             echo "No changes to commit"
             exit 0
           fi
 
-          git add "$KUSTOMIZE_FILE"
-          git commit -m "chore(images): update ${{ inputs.image-name }} to ${IMAGE_TAG} [skip ci]"
+          git add "${KUSTOMIZE_FILE}"
+          git commit -m "chore(images): update ${IMAGE_NAME} to ${IMAGE_TAG} [skip ci]"
           git push origin "${GITHUB_REF_NAME}"
-          echo "Updated $KUSTOMIZE_FILE with new tag: ${IMAGE_TAG}"
+          echo "Updated ${KUSTOMIZE_FILE} with new tag: ${IMAGE_TAG}"

@@ -184,6 +184,28 @@ module aksProdPullRoleAssignment 'modules/role-assignment.bicep' = {
   }
 }
 
+// Assign Key Vault Secrets User to CSI addon identity for DEV Key Vault
+module csiDevKvRoleAssignment 'modules/role-assignment.bicep' = {
+  name: 'deploy-csi-kv-dev-role'
+  scope: rg
+  params: {
+    targetResourceId: keyVaultDev.outputs.keyVaultId
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6') // Key Vault Secrets User
+    principalId: aks.outputs.csiIdentityObjectId
+  }
+}
+
+// Assign Key Vault Secrets User to CSI addon identity for PROD Key Vault
+module csiProdKvRoleAssignment 'modules/role-assignment.bicep' = {
+  name: 'deploy-csi-kv-prod-role'
+  scope: rg
+  params: {
+    targetResourceId: keyVaultProd.outputs.keyVaultId
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6') // Key Vault Secrets User
+    principalId: aks.outputs.csiIdentityObjectId
+  }
+}
+
 // Outputs - DEV resources
 output devAcrLoginServer string = acrDev.outputs.acrLoginServer
 output devAcrName string = acrDev.outputs.acrName

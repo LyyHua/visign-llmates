@@ -74,3 +74,4 @@ resource acrPullRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
 output aksName string = aks.name
 output aksId string = aks.id
 output kubeletIdentityObjectId string = aks.properties.identityProfile.kubeletidentity.objectId
+output csiIdentityObjectId string = aks.properties.addonProfiles.azureKeyvaultSecretsProvider.identity.objectId
