@@ -8,7 +8,7 @@ resources:
 images:
   - name: visignacrftll4r7kkywwy.azurecr.io/visign-ai
     newName: visignpacrftll4r7kkywwy.azurecr.io/visign-ai
-    newTag: main-8dd8320d02f8509ba90e5f26fef06e8511a3e911
+    newTag: ""
   - name: visignacrftll4r7kkywwy.azurecr.io/visign-web
     newName: visignpacrftll4r7kkywwy.azurecr.io/visign-web
     newTag: main-8dd8320d02f8509ba90e5f26fef06e8511a3e911
