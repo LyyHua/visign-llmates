@@ -27,7 +27,7 @@ patches:
 images:
   - name: visignacrftll4r7kkywwy.azurecr.io/visign-ai
     newName: visigndacrftll4r7kkywwy.azurecr.io/visign-ai
-    newTag: dev-4b5729a8866cd0c979907082e1037106c5ba0606
+    newTag: ""
   - name: visignacrftll4r7kkywwy.azurecr.io/visign-web
     newName: visigndacrftll4r7kkywwy.azurecr.io/visign-web
     newTag: dev-4b5729a8866cd0c979907082e1037106c5ba0606
