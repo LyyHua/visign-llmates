@@ -144,6 +144,8 @@ $DEPLOYMENT_OUTPUTS = az deployment sub show `
 
 $DEV_ACR_NAME = $DEPLOYMENT_OUTPUTS.devAcrName.value
 $PROD_ACR_NAME = $DEPLOYMENT_OUTPUTS.prodAcrName.value
+$DEV_KV_NAME = $DEPLOYMENT_OUTPUTS.devKeyVaultName.value
+$PROD_KV_NAME = $DEPLOYMENT_OUTPUTS.prodKeyVaultName.value
 
 az acr update -n $DEV_ACR_NAME -g visign-rg --admin-enabled true
 az acr update -n $PROD_ACR_NAME -g visign-rg --admin-enabled true
@@ -151,12 +153,22 @@ az acr update -n $PROD_ACR_NAME -g visign-rg --admin-enabled true
 $DEV_ACR_CREDS  = az acr credential show -n $DEV_ACR_NAME  -g visign-rg | ConvertFrom-Json
 $PROD_ACR_CREDS = az acr credential show -n $PROD_ACR_NAME -g visign-rg | ConvertFrom-Json
 
+$TENANT_ID = az account show --query tenantId -o tsv
+$CSI_CLIENT_ID = az aks show --resource-group visign-rg --name visign-aks `
+  --query "addonProfiles.azureKeyvaultSecretsProvider.identity.clientId" -o tsv
+
+Write-Host "--- ACR Credentials (Add to GitHub Secrets) ---"
 Write-Host "DEV_ACR_LOGIN_SERVER : $($DEPLOYMENT_OUTPUTS.devAcrLoginServer.value)"
 Write-Host "DEV_ACR_USERNAME     : $($DEV_ACR_CREDS.username)"
 Write-Host "DEV_ACR_PASSWORD     : $($DEV_ACR_CREDS.passwords[0].value)"
 Write-Host "PROD_ACR_LOGIN_SERVER: $($DEPLOYMENT_OUTPUTS.prodAcrLoginServer.value)"
 Write-Host "PROD_ACR_USERNAME    : $($PROD_ACR_CREDS.username)"
 Write-Host "PROD_ACR_PASSWORD    : $($PROD_ACR_CREDS.passwords[0].value)"
+Write-Host "`n--- Secrets Provider Config (Update YAML files) ---"
+Write-Host "TENANT_ID            : $TENANT_ID"
+Write-Host "CSI_CLIENT_ID        : $CSI_CLIENT_ID"
+Write-Host "DEV_KV_NAME          : $DEV_KV_NAME"
+Write-Host "PROD_KV_NAME         : $PROD_KV_NAME"
 ```
 
 Go to **GitHub Repo → Settings → Secrets and variables → Actions** and add:
