@@ -17,7 +17,28 @@ spec:
     - host: dev.lyhua.dpdns.org
       http:
         paths:
-          - path: /api
+          - path: /api/predict
+            pathType: Prefix
+            backend:
+              service:
+                name: visign-ai
+                port:
+                  number: 8000
+          - path: /api/videos
+            pathType: Prefix
+            backend:
+              service:
+                name: visign-ai
+                port:
+                  number: 8000
+          - path: /api/topics
+            pathType: Prefix
+            backend:
+              service:
+                name: visign-ai
+                port:
+                  number: 8000
+          - path: /api/labels
             pathType: Prefix
             backend:
               service:
