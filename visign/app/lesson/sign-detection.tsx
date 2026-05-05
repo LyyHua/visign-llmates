@@ -44,7 +44,7 @@ export const SignDetection = ({
     if (holisticRef.current) return;
 
     const holistic = new Holistic({
-      locateFile: (file) => {
+      locateFile: (file: string) => {
         return `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${file}`;
       },
     });

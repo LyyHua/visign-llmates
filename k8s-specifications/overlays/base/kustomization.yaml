@@ -6,7 +6,6 @@ resources:
   - visign-ai-service.yaml
   - visign-web-deployment.yaml
   - visign-web-service.yaml
-  - visign-tls-certificate.yaml
 images:
   - name: visign-ai
     newTag: ""
