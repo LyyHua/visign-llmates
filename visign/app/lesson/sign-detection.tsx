@@ -127,12 +127,8 @@ export const SignDetection = ({
      void holisticRef.current
        .send({ image: videoRef.current })
        .catch((error: unknown) => {
-         if (error instanceof Error && error.message.includes("Aborted")) {
-           holisticAbortedRef.current = true;
-           console.warn("MediaPipe Holistic WASM crashed — landmark overlay disabled");
-           return;
-         }
-         console.error("Error detecting holistic:", error);
+         holisticAbortedRef.current = true;
+         console.warn("MediaPipe Holistic WASM crashed or threw an error — landmark overlay disabled.", error);
        });
    }
 
