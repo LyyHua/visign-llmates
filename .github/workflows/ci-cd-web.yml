@@ -5,14 +5,14 @@ on:
   push:
     branches: [dev, main]
     paths:
-      - "visign-llmates/**"
+      - "visign/**"
       - "docker-compose.yml"
       - ".github/workflows/ci-cd-web.yml"
       - ".github/workflows/reusable-compose-build-push.yml"
   pull_request:
     branches: [dev, main]
     paths:
-      - "visign-llmates/**"
+      - "visign/**"
       - "docker-compose.yml"
       - ".github/workflows/ci-cd-web.yml"
       - ".github/workflows/reusable-compose-build-push.yml"
