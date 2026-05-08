@@ -45,16 +45,9 @@ jobs:
           set -euo pipefail
           if [ "${{ inputs.env-profile }}" = "ai" ]; then
             echo "TORCH_COMPUTE=cpu" > .env
-            echo "DATABASE_URL=dummy-for-ai-build" >> .env
-            echo "OPENAI_API_KEY=dummy-for-ai-build" >> .env
-            echo "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}" >> .env
-            echo "CLERK_SECRET_KEY=dummy-for-ai-build" >> .env
           elif [ "${{ inputs.env-profile }}" = "web" ]; then
-            echo "TORCH_COMPUTE=cpu" > .env
             echo "DATABASE_URL=postgres://dummy:dummy@localhost:5432/dummy" >> .env
-            echo "OPENAI_API_KEY=dummy-for-web-build" >> .env
             echo "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}" >> .env
-            echo "CLERK_SECRET_KEY=dummy-for-web-build" >> .env
           else
             echo "Unsupported env profile: ${{ inputs.env-profile }}" >&2
             exit 1
@@ -117,14 +110,10 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git config --global user.name "github-actions[bot]"
 
-          git fetch origin "${GITHUB_REF_NAME}"
-          git pull --rebase origin "${GITHUB_REF_NAME}"
-
           # Use yq to find the image entry by name and update newName + newTag in-place
-          BASE_IMAGE_NAME="visignacrftll4r7kkywwy.azurecr.io/${IMAGE_NAME}"
           yq e -i "
-            (.images[] | select(.name == \"${BASE_IMAGE_NAME}\") | .newName) = \"${ACR_LOGIN_SERVER}/${IMAGE_NAME}\" |
-            (.images[] | select(.name == \"${BASE_IMAGE_NAME}\") | .newTag) = \"${IMAGE_TAG}\"
+            (.images[] | select(.name == \"${IMAGE_NAME}\") | .newName) = \"${ACR_LOGIN_SERVER}/${IMAGE_NAME}\" |
+            (.images[] | select(.name == \"${IMAGE_NAME}\") | .newTag) = \"${IMAGE_TAG}\"
           " "${KUSTOMIZE_FILE}"
 
           if git diff --quiet "${KUSTOMIZE_FILE}"; then
@@ -134,5 +123,25 @@ jobs:
 
           git add "${KUSTOMIZE_FILE}"
           git commit -m "chore(images): update ${IMAGE_NAME} to ${IMAGE_TAG} [skip ci]"
-          git push origin "${GITHUB_REF_NAME}"
-          echo "Updated ${KUSTOMIZE_FILE} with new tag: ${IMAGE_TAG}"
+          
+          # Anti-Race-Condition Retry Loop
+          MAX_RETRIES=3
+          ATTEMPT=0
+          
+          while [ $ATTEMPT -lt $MAX_RETRIES ]; do
+            if git push origin "${GITHUB_REF_NAME}"; then
+              echo "Updated ${KUSTOMIZE_FILE} with new tag: ${IMAGE_TAG}"
+              break
+            else
+              echo "Push failed (likely a race condition). Rebasing and retrying..."
+              ATTEMPT=$((ATTEMPT+1))
+              # Fetch and rebase on top of the other workflow's commit
+              git pull --rebase origin "${GITHUB_REF_NAME}"
+              if [ $ATTEMPT -eq $MAX_RETRIES ]; then
+                echo "Failed to push after $MAX_RETRIES attempts."
+                exit 1
+              fi
+              # Wait a random amount of seconds (1-3) to offset the race
+              sleep $((1 + $RANDOM % 3))
+            fi
+          done
