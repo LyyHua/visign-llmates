@@ -1,29 +1,25 @@
-@description('Name of the container registry')
-param acrName string
+// ============================================================
+// CONTAINER REGISTRY MODULE
+// adminUserEnabled: false → access via Managed Identity only
+// ============================================================
 
-@description('Location for the registry')
 param location string
+param acrName  string
 
-@description('Azure Container Registry SKU')
-@allowed([
-  'Basic'
-  'Standard'
-  'Premium'
-])
+@allowed(['Basic', 'Standard', 'Premium'])
 param acrSku string = 'Basic'
 
 resource acr 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
-  name: acrName
+  name    : acrName
   location: location
-  sku: {
-    name: acrSku
-  }
+  sku     : { name: acrSku }
   properties: {
-    adminUserEnabled: true
+    adminUserEnabled   : false          // Managed Identity only, no username/password
+    publicNetworkAccess: 'Enabled'      // AKS pulls from public ACR endpoint
+    zoneRedundancy     : acrSku == 'Premium' ? 'Enabled' : 'Disabled'
   }
 }
 
-output acrId string = acr.id
+output acrId          string = acr.id
+output acrName        string = acr.name
 output acrLoginServer string = acr.properties.loginServer
-output acrName string = acr.name
-output acrResource object = acr
