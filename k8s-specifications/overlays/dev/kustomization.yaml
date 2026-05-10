@@ -30,4 +30,4 @@ images:
     newTag: "dev-27e73cc3b5f75a6c57199ada9d4a4b816ba1195a"
   - name: visign-web
     newName: visignnonprodacrzse7xf.azurecr.io/visign-web
-    newTag: "dev-613bdfe70b3e22358fb98fb9ad4ab257601183f8"
+    newTag: "dev-47d0ac20620b7cf3f3de65a9985e461de57b1be6"
