@@ -26,8 +26,8 @@ patches:
         path: /spec/template/spec/topologySpreadConstraints
 images:
   - name: visign-ai
-    newName: visigndacrftll4r7kkywwy.azurecr.io/visign-ai
-    newTag: "dev-d7b74d9d71a0da09f77a6b8cc1fe95856c364dc7"
+    newName: visignnonprodacrzse7xf.azurecr.io/visign-ai
+    newTag: "dev-27e73cc3b5f75a6c57199ada9d4a4b816ba1195a"
   - name: visign-web
     newName: visignnonprodacrzse7xf.azurecr.io/visign-web
     newTag: "dev-2389e22b5dedc7d1788387872428b5a0fc9d83b8"
