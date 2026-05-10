@@ -27,7 +27,7 @@ patches:
 images:
   - name: visign-ai
     newName: visignnonprodacrzse7xf.azurecr.io/visign-ai
-    newTag: "dev-27e73cc3b5f75a6c57199ada9d4a4b816ba1195a"
+    newTag: "dev-47d0ac20620b7cf3f3de65a9985e461de57b1be6"
   - name: visign-web
     newName: visignnonprodacrzse7xf.azurecr.io/visign-web
     newTag: "dev-47d0ac20620b7cf3f3de65a9985e461de57b1be6"
