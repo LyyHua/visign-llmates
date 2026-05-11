@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: visign-web
+  labels:
+    app: visign-web
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: visign-web
+  template:
+    metadata:
+      labels:
+        app: visign-web
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        fsGroupChangePolicy: OnRootMismatch
+      containers:
+        - name: visign-web
+          image: visign-web:latest
+          ports:
+            - containerPort: 3000
+          volumeMounts:
+            - name: secrets-store
+              mountPath: "/mnt/secrets-store"
+              readOnly: true
+            - name: next-cache
+              mountPath: "/app/.next/cache"
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: NEXT_PUBLIC_API_URL
+              value: "http://visign-ai:8000"
+            - name: MODEL_SERVER_URL
+              value: "http://visign-ai:8000"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: visign-secrets
+                  key: DATABASE_URL
+            - name: NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: visign-secrets
+                  key: NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+            - name: CLERK_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: visign-secrets
+                  key: CLERK_SECRET_KEY
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+      volumes:
+        - name: secrets-store
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: visign-kv-secrets
+        - name: next-cache
+          emptyDir: {}

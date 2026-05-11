@@ -3,13 +3,15 @@ kind: Kustomization
 
 namespace: visign-dev
 
-commonLabels:
-  app.kubernetes.io/name: visign-ai
-  app.kubernetes.io/instance: dev
-  app.kubernetes.io/component: ai
+labels:
+  - pairs:
+      app.kubernetes.io/name: visign-ai
+      app.kubernetes.io/instance: dev
+      app.kubernetes.io/component: ai
+    includeSelectors: false
 
 resources:
-  - ../../../base
+  - ../../../base/visign-ai
 
 components:
   - ../shared

@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: visign-ai
+  labels:
+    app: visign-ai
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: visign-ai
+  template:
+    metadata:
+      labels:
+        app: visign-ai
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: visign-ai
+          image: visign-ai:latest
+          ports:
+            - containerPort: 8000
+          volumeMounts:
+            - name: secrets-store
+              mountPath: "/mnt/secrets-store"
+              readOnly: true
+          env:
+            - name: TORCH_COMPUTE
+              valueFrom:
+                secretKeyRef:
+                  name: visign-secrets
+                  key: TORCH_COMPUTE
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: visign-secrets
+                  key: OPENAI_API_KEY
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "2Gi"
+          readinessProbe:
+            httpGet:
+              path: /docs
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /docs
+              port: 8000
+            initialDelaySeconds: 60
+            periodSeconds: 30
+      volumes:
+        - name: secrets-store
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: visign-kv-secrets
