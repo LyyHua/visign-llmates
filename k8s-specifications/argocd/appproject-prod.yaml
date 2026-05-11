@@ -12,6 +12,7 @@ spec:
   destinations:
     - namespace: visign-prod
       server: https://kubernetes.default.svc
-  clusterResourceWhitelist:
+  clusterResourceWhitelist: []
+  namespaceResourceWhitelist:
     - group: '*'
       kind: '*'

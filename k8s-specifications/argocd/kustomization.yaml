@@ -5,6 +5,9 @@ resources:
   - appproject-dev.yaml
   - appproject-prod.yaml
   - appproject-infra.yaml
-  - application-visign-dev.yaml
-  - application-visign-prod.yaml
+  - application-visign-web-dev.yaml
+  - application-visign-ai-dev.yaml
+  - application-visign-web-prod.yaml
+  - application-visign-ai-prod.yaml
   - application-visign-infra.yaml
+  - rbac-cm.yaml

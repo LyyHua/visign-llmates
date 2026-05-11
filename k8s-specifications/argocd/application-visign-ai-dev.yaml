@@ -1,14 +1,14 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: visign-dev
+  name: visign-ai-dev
   namespace: argocd
 spec:
   project: dev-project
   source:
     repoURL: https://github.com/LyyHua/visign-llmates
     targetRevision: dev
-    path: k8s-specifications/overlays/dev
+    path: k8s-specifications/overlays/dev/visign-ai
   destination:
     server: https://kubernetes.default.svc
     namespace: visign-dev
@@ -16,5 +16,12 @@ spec:
     automated:
       prune: true
       selfHeal: true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
     syncOptions:
       - CreateNamespace=true
+      - ServerSideApply=true

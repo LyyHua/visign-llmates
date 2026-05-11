@@ -49,6 +49,24 @@ ENV DATABASE_URL=${DATABASE_URL:-postgres://dummy:dummy@localhost:5432/dummy}
 RUN npm run build --mount=type=cache,target=/app/.next/cache;
 
 # ============================================
+# Stage 4: Database Migration Image (for K8s Job)
+# ============================================
+FROM node:${NODE_VERSION} AS migrator
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+
+# Copy dependencies and build artifacts from builder
+COPY --from=dependencies /app/node_modules ./node_modules
+COPY --from=builder /app/drizzle ./drizzle
+COPY --from=builder /app/package.json ./
+COPY --from=builder /app/scripts ./scripts
+
+# Expose migration command
+CMD ["npm", "run", "db:migrate"]
+
+# ============================================
 # Stage 3: Run Next.js application
 # ============================================
 

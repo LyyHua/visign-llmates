@@ -13,6 +13,7 @@
     "db:push": "npx drizzle-kit push",
     "db:prod1": "tsx ./scripts/prod.ts",
     "db:prod": "tsx ./scripts/seed-vietnamese-signs.ts",
+    "db:migrate": "tsx ./scripts/migrate-db.ts",
     "model:start": "node -e \"require('child_process').spawn('cmd', ['/c', 'scripts\\\\start-model-server.bat'], {stdio: 'inherit', shell: true})\""
   },
   "author": {

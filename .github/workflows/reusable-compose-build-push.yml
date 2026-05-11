@@ -19,6 +19,10 @@ on:
         description: Build env profile (ai or web)
         required: true
         type: string
+      kustomize-id:
+        description: Service ID for kustomization path (e.g., visign-web, visign-ai)
+        required: true
+        type: string
       push-images:
         description: Push image to ACR after build
         required: false
@@ -40,38 +44,30 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Write build env file
-        run: |
-          set -euo pipefail
-          if [ "${{ inputs.env-profile }}" = "ai" ]; then
-            echo "TORCH_COMPUTE=cpu" > .env
-            echo "DATABASE_URL=dummy-for-ai-build" >> .env
-            echo "OPENAI_API_KEY=dummy-for-ai-build" >> .env
-            echo "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}" >> .env
-            echo "CLERK_SECRET_KEY=dummy-for-ai-build" >> .env
-          elif [ "${{ inputs.env-profile }}" = "web" ]; then
-            echo "TORCH_COMPUTE=cpu" > .env
-            echo "DATABASE_URL=postgres://dummy:dummy@localhost:5432/dummy" >> .env
-            echo "OPENAI_API_KEY=dummy-for-web-build" >> .env
-            echo "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}" >> .env
-            echo "CLERK_SECRET_KEY=dummy-for-web-build" >> .env
-          else
-            echo "Unsupported env profile: ${{ inputs.env-profile }}" >&2
-            exit 1
-          fi
+      - name: Set up Docker layer cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ inputs.service }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ inputs.service }}-buildx-
 
-      - name: Build image with Buildx bake cache
+      - name: Build image with proper Docker cache
         env:
           COMPOSE_DOCKER_CLI_BUILD: 1
           DOCKER_BUILDKIT: 1
           BUILDKIT_PROGRESS: plain
         run: |
           set -euo pipefail
-          docker buildx bake --file docker-compose.yml "${{ inputs.service }}" \
-            --set "${{ inputs.service }}.cache-from=type=gha,scope=${{ inputs.image-name }}" \
-            --set "${{ inputs.service }}.cache-to=type=gha,mode=max,scope=${{ inputs.image-name }}" \
-            --set "${{ inputs.service }}.output=type=docker,name=${{ inputs.local-image }}"
-          docker image inspect "${{ inputs.local-image }}" > /dev/null
+
+          # Create cache directory
+          mkdir -p /tmp/.buildx-cache
+
+          # Build with proper cache import and export
+          docker buildx bake --file docker-compose.yml ${{ inputs.service }} \
+            --set ${{ inputs.service }}.output=type=docker,name=${{ inputs.local-image }} \
+            --set ${{ inputs.service }}.cache-from=type=local,src=/tmp/.buildx-cache \
+            --set ${{ inputs.service }}.cache-to=type=local,dest=/tmp/.buildx-cache,mode=max
 
       - name: Login to ACR
         if: inputs.push-images
@@ -107,17 +103,18 @@ jobs:
           IMAGE_TAG="${{ steps.build-push.outputs.image-tag }}"
           ACR_LOGIN_SERVER="${{ github.ref_name == 'dev' && secrets.NONPROD_ACR_LOGIN_SERVER || secrets.PROD_ACR_LOGIN_SERVER }}"
           IMAGE_NAME="${{ inputs.image-name }}"
+          KUSTOMIZE_ID="${{ inputs.kustomize-id }}"
 
           if [ "${GITHUB_REF_NAME}" = "dev" ]; then
-            KUSTOMIZE_FILE="k8s-specifications/overlays/dev/kustomization.yaml"
+            KUSTOMIZE_FILE="k8s-specifications/overlays/dev/${KUSTOMIZE_ID}/kustomization.yaml"
           else
-            KUSTOMIZE_FILE="k8s-specifications/overlays/prod/kustomization.yaml"
+            KUSTOMIZE_FILE="k8s-specifications/overlays/prod/${KUSTOMIZE_ID}/kustomization.yaml"
           fi
 
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git config --global user.name "github-actions[bot]"
 
-          # Use yq to find the image entry by name and update newName + newTag in-place
+          # Update image name/tag in the overlay kustomization
           yq e -i "
             (.images[] | select(.name == \"${IMAGE_NAME}\") | .newName) = \"${ACR_LOGIN_SERVER}/${IMAGE_NAME}\" |
             (.images[] | select(.name == \"${IMAGE_NAME}\") | .newTag) = \"${IMAGE_TAG}\"
@@ -130,25 +127,21 @@ jobs:
 
           git add "${KUSTOMIZE_FILE}"
           git commit -m "chore(images): update ${IMAGE_NAME} to ${IMAGE_TAG} [skip ci]"
-          
-          # Anti-Race-Condition Retry Loop
-          MAX_RETRIES=3
-          ATTEMPT=0
-          
-          while [ $ATTEMPT -lt $MAX_RETRIES ]; do
+
+          # Ensure we pull remote changes and rebase to avoid push conflicts
+          git pull --rebase origin "${GITHUB_REF_NAME}" || true
+
+          # Retry push up to 3 times (handles concurrent workflow pushes)
+          for i in 1 2 3; do
             if git push origin "${GITHUB_REF_NAME}"; then
-              echo "Updated ${KUSTOMIZE_FILE} with new tag: ${IMAGE_TAG}"
+              echo "Push succeeded"
               break
-            else
-              echo "Push failed (likely a race condition). Rebasing and retrying..."
-              ATTEMPT=$((ATTEMPT+1))
-              # Fetch and rebase on top of the other workflow's commit
-              git pull --rebase origin "${GITHUB_REF_NAME}"
-              if [ $ATTEMPT -eq $MAX_RETRIES ]; then
-                echo "Failed to push after $MAX_RETRIES attempts."
-                exit 1
-              fi
-              # Wait a random amount of seconds (1-3) to offset the race
-              sleep $((1 + $RANDOM % 3))
+            fi
+            echo "Push failed, rebase and retry (attempt $i)"
+            git pull --rebase origin "${GITHUB_REF_NAME}" || true
+            sleep 2
+            if [ "$i" = "3" ]; then
+              echo "Push failed after retries"
+              exit 1
             fi
           done

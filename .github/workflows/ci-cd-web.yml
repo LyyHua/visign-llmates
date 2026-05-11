@@ -25,12 +25,42 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: "visign/package-lock.json"
+      - name: Install dependencies
+        run: cd visign && npm ci
+      - name: Run ESLint
+        run: cd visign && npm run lint
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: "visign/package-lock.json"
+      - name: Install dependencies
+        run: cd visign && npm ci
+      - name: Run tests
+        run: cd visign && npm test -- --passWithNoTests
+
   build-and-push:
+    needs: [lint, test]
     uses: ./.github/workflows/reusable-compose-build-push.yml
     with:
       service: nextjs
       image-name: visign-web
       local-image: visign-llmates-nextjs:latest
       env-profile: web
+      kustomize-id: visign-web
       push-images: ${{ github.event_name != 'pull_request' }}
     secrets: inherit
