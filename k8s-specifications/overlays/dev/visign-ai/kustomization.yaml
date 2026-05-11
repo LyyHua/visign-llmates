@@ -7,7 +7,6 @@ commonLabels:
   app.kubernetes.io/component: ai
 resources:
   - ../../../base
-  - ../shared/namespace.yaml
 patches:
   - path: ../shared/secrets-provider.yaml
   - path: ../shared/ingress.yaml
