@@ -1,21 +1,16 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-
 namespace: visign-dev
-
 labels:
   - pairs:
       app.kubernetes.io/name: visign-web
       app.kubernetes.io/instance: dev
       app.kubernetes.io/component: web
     includeSelectors: false
-
 resources:
   - ../../../base/visign-web
-
 components:
   - ../shared
-
 patches:
   - target:
       kind: Ingress
@@ -37,8 +32,7 @@ patches:
       - op: replace
         path: /spec/replicas
         value: 1
-
 images:
   - name: visign-web
     newName: visignnonprodacrzse7xf.azurecr.io/visign-web
-    newTag: "dev-fcaf670e118e36d9481f09fca949c615d82d4e70"
+    newTag: "dev-2ca9a41f23bace57a1ba4f22b8dcced757ef4ba7"
