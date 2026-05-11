@@ -18,7 +18,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: migration
-          image: visign-web:latest
+          image: visign-web-migrator:latest
           command: ["npm", "run", "db:migrate"]
           volumeMounts:
             - name: secrets-store

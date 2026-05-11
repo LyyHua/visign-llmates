@@ -70,13 +70,25 @@ jobs:
               ai-model/
 
           elif [ "${{ inputs.env-profile }}" = "web" ]; then
+            # Build the production runner stage
             docker buildx build \
               --file visign/Dockerfile \
+              --target runner \
               --build-arg DATABASE_URL=postgres://dummy:dummy@localhost:5432/dummy \
               --build-arg NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }} \
               --cache-from type=local,src=/tmp/.buildx-cache \
               --cache-to type=local,dest=/tmp/.buildx-cache,mode=max \
               --output type=docker,name=${{ inputs.local-image }} \
+              visign/
+
+            # Build the migrator stage (reuses shared cache layers from runner build)
+            docker buildx build \
+              --file visign/Dockerfile \
+              --target migrator \
+              --build-arg DATABASE_URL=postgres://dummy:dummy@localhost:5432/dummy \
+              --build-arg NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }} \
+              --cache-from type=local,src=/tmp/.buildx-cache \
+              --output type=docker,name=visign-llmates-migrator:latest \
               visign/
 
           else
@@ -103,6 +115,14 @@ jobs:
           IMAGE_REF="${ACR_LOGIN_SERVER}/${{ inputs.image-name }}:${IMAGE_TAG}"
           docker tag "${{ inputs.local-image }}" "${IMAGE_REF}"
           docker push "${IMAGE_REF}"
+
+          # Also push the migrator image if this is a web build
+          if [ "${{ inputs.env-profile }}" = "web" ]; then
+            MIGRATOR_REF="${ACR_LOGIN_SERVER}/visign-web-migrator:${IMAGE_TAG}"
+            docker tag visign-llmates-migrator:latest "${MIGRATOR_REF}"
+            docker push "${MIGRATOR_REF}"
+          fi
+
           echo "image-tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
 
       - name: Install yq
@@ -134,6 +154,14 @@ jobs:
             (.images[] | select(.name == \"${IMAGE_NAME}\") | .newName) = \"${ACR_LOGIN_SERVER}/${IMAGE_NAME}\" |
             (.images[] | select(.name == \"${IMAGE_NAME}\") | .newTag) = \"${IMAGE_TAG}\"
           " "${KUSTOMIZE_FILE}"
+
+          # Also update migrator image tag if this is a web build
+          if [ "${{ inputs.env-profile }}" = "web" ]; then
+            yq e -i "
+              (.images[] | select(.name == \"${IMAGE_NAME}-migrator\") | .newName) = \"${ACR_LOGIN_SERVER}/${IMAGE_NAME}-migrator\" |
+              (.images[] | select(.name == \"${IMAGE_NAME}-migrator\") | .newTag) = \"${IMAGE_TAG}\"
+            " "${KUSTOMIZE_FILE}"
+          fi
 
           if git diff --quiet "${KUSTOMIZE_FILE}"; then
             echo "No changes to commit"
