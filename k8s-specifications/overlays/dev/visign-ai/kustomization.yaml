@@ -1,17 +1,13 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-
 namespace: visign-dev
-
 commonLabels:
   app.kubernetes.io/name: visign-ai
   app.kubernetes.io/instance: dev
   app.kubernetes.io/component: ai
-
 resources:
   - ../../../base
   - ../shared/namespace.yaml
-
 patches:
   - path: ../shared/secrets-provider.yaml
   - path: ../shared/ingress.yaml
@@ -22,8 +18,7 @@ patches:
       - op: replace
         path: /spec/replicas
         value: 1
-
 images:
   - name: visign-ai
     newName: visignnonprodacrzse7xf.azurecr.io/visign-ai
-    newTag: "dev-latest"
+    newTag: "dev-01a19b267640ad577819583c8cd38d7e3609e35d"
