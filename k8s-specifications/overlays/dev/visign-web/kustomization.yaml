@@ -1,15 +1,20 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
+
 namespace: visign-dev
+
 commonLabels:
   app.kubernetes.io/name: visign-web
   app.kubernetes.io/instance: dev
   app.kubernetes.io/component: web
+
 resources:
   - ../../../base
+
+components:
+  - ../shared
+
 patches:
-  - path: ../shared/secrets-provider.yaml
-  - path: ../shared/ingress.yaml
   - target:
       kind: Deployment
       name: visign-web
@@ -17,6 +22,7 @@ patches:
       - op: replace
         path: /spec/replicas
         value: 1
+
 images:
   - name: visign-web
     newName: visignnonprodacrzse7xf.azurecr.io/visign-web
