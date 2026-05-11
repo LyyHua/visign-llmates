@@ -52,6 +52,22 @@ jobs:
           restore-keys: |
             ${{ inputs.service }}-buildx-
 
+      - name: Write build env file
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.env-profile }}" = "ai" ]; then
+            echo "TORCH_COMPUTE=cpu" >> .env
+            echo "DATABASE_URL=postgres://dummy:dummy@localhost:5432/dummy" >> .env
+            echo "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}" >> .env
+          elif [ "${{ inputs.env-profile }}" = "web" ]; then
+            echo "TORCH_COMPUTE=cpu" >> .env
+            echo "DATABASE_URL=postgres://dummy:dummy@localhost:5432/dummy" >> .env
+            echo "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}" >> .env
+          else
+            echo "Unsupported env-profile: ${{ inputs.env-profile }}" >&2
+            exit 1
+          fi
+
       - name: Build image with proper Docker cache
         env:
           COMPOSE_DOCKER_CLI_BUILD: 1

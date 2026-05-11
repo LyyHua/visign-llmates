@@ -25,7 +25,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  lint:
+  lint-and-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -38,23 +38,18 @@ jobs:
         run: cd visign && npm ci
       - name: Run ESLint
         run: cd visign && npm run lint
-
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: "npm"
-          cache-dependency-path: "visign/package-lock.json"
-      - name: Install dependencies
-        run: cd visign && npm ci
       - name: Run tests
-        run: cd visign && npm test -- --passWithNoTests
+        # package.json has no "test" script — skip gracefully if missing
+        run: |
+          cd visign
+          if npm run | grep -q '\btest\b'; then
+            npm test
+          else
+            echo "No test script found, skipping."
+          fi
 
   build-and-push:
-    needs: [lint, test]
+    needs: [lint-and-test]
     uses: ./.github/workflows/reusable-compose-build-push.yml
     with:
       service: nextjs

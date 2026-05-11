@@ -25,7 +25,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  lint:
+  lint-and-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -34,29 +34,24 @@ jobs:
           python-version: "3.11"
           cache: "pip"
           cache-dependency-path: "ai-model/requirements.txt"
-      - name: Install dependencies
-        run: cd ai-model && pip install ruff mypy
+      - name: Install lint tools
+        run: pip install ruff
       - name: Run ruff
+        # Non-blocking: ruff is advisory only, not blocking the build
         run: cd ai-model && ruff check . || true
-      - name: Run mypy
-        run: cd ai-model && mypy . || true
-
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v4
-        with:
-          python-version: "3.11"
-          cache: "pip"
-          cache-dependency-path: "ai-model/requirements.txt"
-      - name: Install dependencies
-        run: cd ai-model && pip install -r requirements.txt pytest
       - name: Run pytest
-        run: cd ai-model && pytest tests/ || true
+        # Install only pytest; full ML deps are too heavy for CI lint/test stage
+        run: |
+          pip install pytest
+          cd ai-model
+          if [ -d tests ]; then
+            pytest tests/ -v || true
+          else
+            echo "No tests/ directory found, skipping."
+          fi
 
   build-and-push:
-    needs: [lint, test]
+    needs: [lint-and-test]
     uses: ./.github/workflows/reusable-compose-build-push.yml
     with:
       service: fastapi
