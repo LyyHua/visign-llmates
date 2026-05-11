@@ -1,7 +1,5 @@
 import { Client } from "pg";
 import "dotenv/config";
-import { migrate } from "drizzle-orm/postgres/migrator";
-import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 
 // Suppress the SSL warning

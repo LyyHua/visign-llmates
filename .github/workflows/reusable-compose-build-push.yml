@@ -52,38 +52,37 @@ jobs:
           restore-keys: |
             ${{ inputs.service }}-buildx-
 
-      - name: Write build env file
-        run: |
-          set -euo pipefail
-          if [ "${{ inputs.env-profile }}" = "ai" ]; then
-            echo "TORCH_COMPUTE=cpu" >> .env
-            echo "DATABASE_URL=postgres://dummy:dummy@localhost:5432/dummy" >> .env
-            echo "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}" >> .env
-          elif [ "${{ inputs.env-profile }}" = "web" ]; then
-            echo "TORCH_COMPUTE=cpu" >> .env
-            echo "DATABASE_URL=postgres://dummy:dummy@localhost:5432/dummy" >> .env
-            echo "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}" >> .env
-          else
-            echo "Unsupported env-profile: ${{ inputs.env-profile }}" >&2
-            exit 1
-          fi
-
-      - name: Build image with proper Docker cache
+      - name: Build image
         env:
-          COMPOSE_DOCKER_CLI_BUILD: 1
           DOCKER_BUILDKIT: 1
           BUILDKIT_PROGRESS: plain
         run: |
           set -euo pipefail
-
-          # Create cache directory
           mkdir -p /tmp/.buildx-cache
 
-          # Build with proper cache import and export
-          docker buildx bake --file docker-compose.yml ${{ inputs.service }} \
-            --set ${{ inputs.service }}.output=type=docker,name=${{ inputs.local-image }} \
-            --set ${{ inputs.service }}.cache-from=type=local,src=/tmp/.buildx-cache \
-            --set ${{ inputs.service }}.cache-to=type=local,dest=/tmp/.buildx-cache,mode=max
+          if [ "${{ inputs.env-profile }}" = "ai" ]; then
+            docker buildx build \
+              --file ai-model/Dockerfile \
+              --build-arg TORCH_COMPUTE=cpu \
+              --cache-from type=local,src=/tmp/.buildx-cache \
+              --cache-to type=local,dest=/tmp/.buildx-cache,mode=max \
+              --output type=docker,name=${{ inputs.local-image }} \
+              ai-model/
+
+          elif [ "${{ inputs.env-profile }}" = "web" ]; then
+            docker buildx build \
+              --file visign/Dockerfile \
+              --build-arg DATABASE_URL=postgres://dummy:dummy@localhost:5432/dummy \
+              --build-arg NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }} \
+              --cache-from type=local,src=/tmp/.buildx-cache \
+              --cache-to type=local,dest=/tmp/.buildx-cache,mode=max \
+              --output type=docker,name=${{ inputs.local-image }} \
+              visign/
+
+          else
+            echo "Unsupported env-profile: ${{ inputs.env-profile }}" >&2
+            exit 1
+          fi
 
       - name: Login to ACR
         if: inputs.push-images
