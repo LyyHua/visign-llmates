@@ -35,7 +35,7 @@ jobs:
           cache: "npm"
           cache-dependency-path: "visign/package-lock.json"
       - name: Install dependencies
-        run: cd visign && npm ci
+        run: cd visign && npm ci --no-audit --no-fund
       - name: Run ESLint
         run: cd visign && npm run lint
       - name: Run tests
