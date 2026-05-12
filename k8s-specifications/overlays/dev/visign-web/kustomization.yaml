@@ -35,7 +35,7 @@ patches:
 images:
   - name: visign-web
     newName: visignnonprodacrzse7xf.azurecr.io/visign-web
-    newTag: "dev-8f0159f3791f1fb138388275842840f2e90f6f49"
+    newTag: "dev-35174024e762d46506bcb6762510b5cdb0a054a6"
   - name: visign-web-migrator
     newName: visignnonprodacrzse7xf.azurecr.io/visign-web-migrator
-    newTag: "dev-8f0159f3791f1fb138388275842840f2e90f6f49"
+    newTag: "dev-35174024e762d46506bcb6762510b5cdb0a054a6"
