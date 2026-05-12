@@ -141,9 +141,9 @@ jobs:
           KUSTOMIZE_ID="${{ inputs.kustomize-id }}"
 
           if [ "${GITHUB_REF_NAME}" = "dev" ]; then
-            KUSTOMIZE_FILE="k8s-specifications/overlays/dev/${KUSTOMIZE_ID}/kustomization.yaml"
+            KUSTOMIZE_FILE="k8s-specifications/clusters/nonprod/overlays/dev/${KUSTOMIZE_ID}/kustomization.yaml"
           else
-            KUSTOMIZE_FILE="k8s-specifications/overlays/prod/${KUSTOMIZE_ID}/kustomization.yaml"
+            KUSTOMIZE_FILE="k8s-specifications/clusters/prod/overlays/prod/${KUSTOMIZE_ID}/kustomization.yaml"
           fi
 
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
