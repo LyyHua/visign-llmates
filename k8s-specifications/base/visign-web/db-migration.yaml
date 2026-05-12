@@ -4,9 +4,6 @@ metadata:
   name: visign-db-migration
   labels:
     app: visign-db-migration
-  annotations:
-    argocd.argoproj.io/hook: PreSync
-    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
 spec:
   ttlSecondsAfterFinished: 300
   backoffLimit: 1

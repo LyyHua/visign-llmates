@@ -23,21 +23,6 @@ spec:
           image: visign-ai:latest
           ports:
             - containerPort: 8000
-          volumeMounts:
-            - name: secrets-store
-              mountPath: "/mnt/secrets-store"
-              readOnly: true
-          env:
-            - name: TORCH_COMPUTE
-              valueFrom:
-                secretKeyRef:
-                  name: visign-secrets
-                  key: TORCH_COMPUTE
-            - name: OPENAI_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: visign-secrets
-                  key: OPENAI_API_KEY
           resources:
             requests:
               cpu: "250m"
@@ -57,10 +42,3 @@ spec:
               port: 8000
             initialDelaySeconds: 60
             periodSeconds: 30
-      volumes:
-        - name: secrets-store
-          csi:
-            driver: secrets-store.csi.k8s.io
-            readOnly: true
-            volumeAttributes:
-              secretProviderClass: visign-kv-secrets
