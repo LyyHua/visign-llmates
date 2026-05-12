@@ -36,3 +36,6 @@ images:
   - name: visign-web
     newName: visignpacrftll4r7kkywwy.azurecr.io/visign-web
     newTag: "prod-latest"
+  - name: visign-web-migrator
+    newName: visignpacrftll4r7kkywwy.azurecr.io/visign-web-migrator
+    newTag: "prod-latest"

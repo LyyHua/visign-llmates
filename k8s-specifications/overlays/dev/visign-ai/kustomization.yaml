@@ -9,8 +9,6 @@ labels:
     includeSelectors: false
 resources:
   - ../../../base/visign-ai
-components:
-  - ../shared
 patches:
   - target:
       kind: Deployment

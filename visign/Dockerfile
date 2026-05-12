@@ -57,6 +57,8 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 
+RUN apk add --no-cache postgresql-client
+
 # Copy dependencies and build artifacts from builder
 COPY --from=dependencies /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./

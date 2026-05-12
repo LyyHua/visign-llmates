@@ -18,7 +18,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: migration
-          image: visign-web:latest
+          image: visign-web-migrator:latest
           command: ["npm", "run", "db:migrate"]
           volumeMounts:
             - name: secrets-store
@@ -30,6 +30,11 @@ spec:
                 secretKeyRef:
                   name: visign-secrets
                   key: DATABASE_URL
+            - name: SOURCE_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: visign-secrets
+                  key: SOURCE_DATABASE_URL
           resources:
             requests:
               cpu: "100m"
