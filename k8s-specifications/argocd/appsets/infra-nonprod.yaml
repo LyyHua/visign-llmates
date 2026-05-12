@@ -1,0 +1,26 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: visign-infra-nonprod
+  namespace: argocd
+spec:
+  generators:
+    - list:
+        elements:
+          - cluster: nonprod
+            clusterServer: "https://kubernetes.default.svc"
+  template:
+    metadata:
+      name: "infra-{{cluster}}"
+    spec:
+      project: infra-project
+      source:
+        repoURL: https://github.com/LyyHua/visign-llmates
+        targetRevision: main
+        path: k8s-specifications/clusters/{{cluster}}/infra
+      destination:
+        server: "{{clusterServer}}"
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
