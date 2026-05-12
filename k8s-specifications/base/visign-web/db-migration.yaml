@@ -27,6 +27,11 @@ spec:
                 secretKeyRef:
                   name: visign-secrets
                   key: DATABASE_URL
+            - name: SOURCE_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: visign-secrets
+                  key: SOURCE_DATABASE_URL
           resources:
             requests:
               cpu: "100m"
