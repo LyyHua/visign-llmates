@@ -128,7 +128,7 @@ async function copyFromSourceToTarget(sourceDatabaseUrl, targetDatabaseUrl) {
 
     const restore = spawn(
       "psql",
-      ["--set", "ON_ERROR_STOP=on", "--dbname", targetDatabaseUrl],
+      ["--dbname", targetDatabaseUrl],
       {
         stdio: ["pipe", "pipe", "pipe"],
         env: process.env,

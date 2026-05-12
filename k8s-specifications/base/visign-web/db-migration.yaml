@@ -5,7 +5,7 @@ metadata:
   labels:
     app: visign-db-migration
 spec:
-  ttlSecondsAfterFinished: 300
+  ttlSecondsAfterFinished: 10
   backoffLimit: 1
   template:
     metadata:
