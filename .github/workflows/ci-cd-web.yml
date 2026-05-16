@@ -3,14 +3,14 @@ name: CI - Visign Web Service
 on:
   workflow_dispatch:
   push:
-    branches: [dev, main]
+    branches: [dev, qa, main]
     paths:
       - "visign/**"
       - "docker-compose.yml"
       - ".github/workflows/ci-cd-web.yml"
       - ".github/workflows/reusable-compose-build-push.yml"
   pull_request:
-    branches: [dev, main]
+    branches: [dev, qa, main]
     paths:
       - "visign/**"
       - "docker-compose.yml"
@@ -58,4 +58,13 @@ jobs:
       env-profile: web
       kustomize-id: visign-web
       push-images: ${{ github.event_name != 'pull_request' }}
+    secrets: inherit
+
+  update-kustomization:
+    needs: [build-and-push]
+    uses: ./.github/workflows/reusable-update.yml
+    with:
+      env-profile: web
+      kustomize-id: visign-web
+      image-tag: ${{ needs.build-and-push.outputs.image-tag }}
     secrets: inherit

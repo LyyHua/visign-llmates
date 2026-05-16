@@ -3,14 +3,14 @@ name: CI - Visign AI Service
 on:
   workflow_dispatch:
   push:
-    branches: [dev, main]
+    branches: [dev, qa, main]
     paths:
       - "ai-model/**"
       - "docker-compose.yml"
       - ".github/workflows/ci-cd-ai.yml"
       - ".github/workflows/reusable-compose-build-push.yml"
   pull_request:
-    branches: [dev, main]
+    branches: [dev, qa, main]
     paths:
       - "ai-model/**"
       - "docker-compose.yml"
@@ -60,4 +60,13 @@ jobs:
       env-profile: ai
       kustomize-id: visign-ai
       push-images: ${{ github.event_name != 'pull_request' }}
+    secrets: inherit
+
+  update-kustomization:
+    needs: [build-and-push]
+    uses: ./.github/workflows/reusable-update.yml
+    with:
+      env-profile: ai
+      kustomize-id: visign-ai
+      image-tag: ${{ needs.build-and-push.outputs.image-tag }}
     secrets: inherit

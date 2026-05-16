@@ -28,6 +28,10 @@ on:
         required: false
         default: true
         type: boolean
+    outputs:
+      image-tag:
+        description: The tag of the image that was built and pushed
+        value: ${{ jobs.push.outputs.image-tag }}
 
 permissions:
   contents: write
@@ -35,8 +39,6 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    outputs:
-      image-tag: ${{ steps.build-push.outputs.image-tag }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -65,7 +67,7 @@ jobs:
               --file ai-model/Dockerfile \
               --build-arg TORCH_COMPUTE=cpu \
               --cache-from type=local,src=/tmp/.buildx-cache \
-              --cache-to type=local,dest=/tmp/.buildx-cache,mode=max \
+              --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
               --output type=docker,name=${{ inputs.local-image }} \
               ai-model/
 
@@ -77,7 +79,7 @@ jobs:
               --build-arg DATABASE_URL=postgres://dummy:dummy@localhost:5432/dummy \
               --build-arg NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }} \
               --cache-from type=local,src=/tmp/.buildx-cache \
-              --cache-to type=local,dest=/tmp/.buildx-cache,mode=max \
+              --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
               --output type=docker,name=${{ inputs.local-image }} \
               visign/
 
@@ -95,23 +97,31 @@ jobs:
             echo "Unsupported env-profile: ${{ inputs.env-profile }}" >&2
             exit 1
           fi
-
+          
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+  push:
+    needs: build
+    outputs:
+      image-tag: ${{ steps.push.outputs.image-tag }}
+    runs-on: ubuntu-latest
+    steps:
       - name: Login to ACR
         if: inputs.push-images
         uses: azure/docker-login@v1
         with:
-          login-server: ${{ github.ref_name == 'dev' && secrets.NONPROD_ACR_LOGIN_SERVER || secrets.PROD_ACR_LOGIN_SERVER }}
-          username: ${{ github.ref_name == 'dev' && secrets.NONPROD_ACR_USERNAME || secrets.PROD_ACR_USERNAME }}
-          password: ${{ github.ref_name == 'dev' && secrets.NONPROD_ACR_PASSWORD || secrets.PROD_ACR_PASSWORD }}
+          login-server: ${{ github.ref_name == 'dev' || github.ref_name == 'qa' && secrets.NONPROD_ACR_LOGIN_SERVER || secrets.PROD_ACR_LOGIN_SERVER }}
+          username: ${{ github.ref_name == 'dev' || github.ref_name == 'qa' && secrets.NONPROD_ACR_USERNAME || secrets.PROD_ACR_USERNAME }}
+          password: ${{ github.ref_name == 'dev' || github.ref_name == 'qa' && secrets.NONPROD_ACR_PASSWORD || secrets.PROD_ACR_PASSWORD }}
 
       - name: Tag and push image
-        id: build-push
+        id: push
         if: inputs.push-images
         run: |
           set -euo pipefail
           SAFE_BRANCH="${GITHUB_REF_NAME//\//-}"
           IMAGE_TAG="${SAFE_BRANCH}-${{ github.sha }}"
-          ACR_LOGIN_SERVER="${{ github.ref_name == 'dev' && secrets.NONPROD_ACR_LOGIN_SERVER || secrets.PROD_ACR_LOGIN_SERVER }}"
+          ACR_LOGIN_SERVER="${{ github.ref_name == 'dev' || github.ref_name == 'qa' && secrets.NONPROD_ACR_LOGIN_SERVER || secrets.PROD_ACR_LOGIN_SERVER }}"
           IMAGE_REF="${ACR_LOGIN_SERVER}/${{ inputs.image-name }}:${IMAGE_TAG}"
           docker tag "${{ inputs.local-image }}" "${IMAGE_REF}"
           docker push "${IMAGE_REF}"
@@ -124,67 +134,3 @@ jobs:
           fi
 
           echo "image-tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
-
-      - name: Install yq
-        if: inputs.push-images && github.event_name != 'pull_request'
-        run: |
-          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-          sudo chmod +x /usr/local/bin/yq
-
-      - name: Update kustomization.yaml
-        if: inputs.push-images && github.event_name != 'pull_request'
-        run: |
-          set -euo pipefail
-          IMAGE_TAG="${{ steps.build-push.outputs.image-tag }}"
-          ACR_LOGIN_SERVER="${{ github.ref_name == 'dev' && secrets.NONPROD_ACR_LOGIN_SERVER || secrets.PROD_ACR_LOGIN_SERVER }}"
-          IMAGE_NAME="${{ inputs.image-name }}"
-          KUSTOMIZE_ID="${{ inputs.kustomize-id }}"
-
-          if [ "${GITHUB_REF_NAME}" = "dev" ]; then
-            KUSTOMIZE_FILE="k8s-specifications/clusters/nonprod/overlays/dev/${KUSTOMIZE_ID}/kustomization.yaml"
-          else
-            KUSTOMIZE_FILE="k8s-specifications/clusters/prod/overlays/prod/${KUSTOMIZE_ID}/kustomization.yaml"
-          fi
-
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git config --global user.name "github-actions[bot]"
-
-          # Update image name/tag in the overlay kustomization
-          yq e -i "
-            (.images[] | select(.name == \"${IMAGE_NAME}\") | .newName) = \"${ACR_LOGIN_SERVER}/${IMAGE_NAME}\" |
-            (.images[] | select(.name == \"${IMAGE_NAME}\") | .newTag) = \"${IMAGE_TAG}\"
-          " "${KUSTOMIZE_FILE}"
-
-          # Also update migrator image tag if this is a web build
-          if [ "${{ inputs.env-profile }}" = "web" ]; then
-            yq e -i "
-              (.images[] | select(.name == \"${IMAGE_NAME}-migrator\") | .newName) = \"${ACR_LOGIN_SERVER}/${IMAGE_NAME}-migrator\" |
-              (.images[] | select(.name == \"${IMAGE_NAME}-migrator\") | .newTag) = \"${IMAGE_TAG}\"
-            " "${KUSTOMIZE_FILE}"
-          fi
-
-          if git diff --quiet "${KUSTOMIZE_FILE}"; then
-            echo "No changes to commit"
-            exit 0
-          fi
-
-          git add "${KUSTOMIZE_FILE}"
-          git commit -m "chore(images): update ${IMAGE_NAME} to ${IMAGE_TAG} [skip ci]"
-
-          # Ensure we pull remote changes and rebase to avoid push conflicts
-          git pull --rebase origin "${GITHUB_REF_NAME}" || true
-
-          # Retry push up to 3 times (handles concurrent workflow pushes)
-          for i in 1 2 3; do
-            if git push origin "${GITHUB_REF_NAME}"; then
-              echo "Push succeeded"
-              break
-            fi
-            echo "Push failed, rebase and retry (attempt $i)"
-            git pull --rebase origin "${GITHUB_REF_NAME}" || true
-            sleep 2
-            if [ "$i" = "3" ]; then
-              echo "Push failed after retries"
-              exit 1
-            fi
-          done
