@@ -130,13 +130,27 @@ jobs:
           name: ${{ inputs.service }}-docker-images
           path: /tmp/build-images
 
+      - name: Resolve ACR target
+        id: acr
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_NAME}" = "dev" ] || [ "${GITHUB_REF_NAME}" = "qa" ]; then
+            echo "login_server=${{ secrets.NONPROD_ACR_LOGIN_SERVER }}" >> "$GITHUB_OUTPUT"
+            echo "username=${{ secrets.NONPROD_ACR_USERNAME }}" >> "$GITHUB_OUTPUT"
+            echo "password=${{ secrets.NONPROD_ACR_PASSWORD }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "login_server=${{ secrets.PROD_ACR_LOGIN_SERVER }}" >> "$GITHUB_OUTPUT"
+            echo "username=${{ secrets.PROD_ACR_USERNAME }}" >> "$GITHUB_OUTPUT"
+            echo "password=${{ secrets.PROD_ACR_PASSWORD }}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Login to ACR
         if: inputs.push-images
         uses: azure/docker-login@v1
         with:
-          login-server: ${{ github.ref_name == 'dev' || github.ref_name == 'qa' && secrets.NONPROD_ACR_LOGIN_SERVER || secrets.PROD_ACR_LOGIN_SERVER }}
-          username: ${{ github.ref_name == 'dev' || github.ref_name == 'qa' && secrets.NONPROD_ACR_USERNAME || secrets.PROD_ACR_USERNAME }}
-          password: ${{ github.ref_name == 'dev' || github.ref_name == 'qa' && secrets.NONPROD_ACR_PASSWORD || secrets.PROD_ACR_PASSWORD }}
+          login-server: ${{ steps.acr.outputs.login_server }}
+          username: ${{ steps.acr.outputs.username }}
+          password: ${{ steps.acr.outputs.password }}
 
       - name: Tag and push image
         id: push
@@ -145,7 +159,7 @@ jobs:
           set -euo pipefail
           SAFE_BRANCH="${GITHUB_REF_NAME//\//-}"
           IMAGE_TAG="${SAFE_BRANCH}-${{ github.sha }}"
-          ACR_LOGIN_SERVER="${{ github.ref_name == 'dev' || github.ref_name == 'qa' && secrets.NONPROD_ACR_LOGIN_SERVER || secrets.PROD_ACR_LOGIN_SERVER }}"
+          ACR_LOGIN_SERVER="${{ steps.acr.outputs.login_server }}"
 
           if [ "${{ inputs.env-profile }}" = "ai" ]; then
             docker load -i /tmp/build-images/main-image.tar
