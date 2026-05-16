@@ -62,6 +62,7 @@ jobs:
 
   update-kustomization:
     needs: [build-and-push]
+    if: github.event_name != 'pull_request'
     uses: ./.github/workflows/reusable-update.yml
     with:
       env-profile: web

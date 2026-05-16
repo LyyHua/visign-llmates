@@ -97,15 +97,39 @@ jobs:
             echo "Unsupported env-profile: ${{ inputs.env-profile }}" >&2
             exit 1
           fi
-          
+
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+
+      - name: Save built images
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/build-images
+
+          if [ "${{ inputs.env-profile }}" = "ai" ]; then
+            docker save "${{ inputs.local-image }}" -o /tmp/build-images/main-image.tar
+          else
+            docker save "${{ inputs.local-image }}" visign-llmates-migrator:latest -o /tmp/build-images/web-images.tar
+          fi
+
+      - name: Upload built images
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.service }}-docker-images
+          path: /tmp/build-images/
+          retention-days: 1
   push:
     needs: build
     outputs:
       image-tag: ${{ steps.push.outputs.image-tag }}
     runs-on: ubuntu-latest
     steps:
+      - name: Download built images
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.service }}-docker-images
+          path: /tmp/build-images
+
       - name: Login to ACR
         if: inputs.push-images
         uses: azure/docker-login@v1
@@ -122,6 +146,13 @@ jobs:
           SAFE_BRANCH="${GITHUB_REF_NAME//\//-}"
           IMAGE_TAG="${SAFE_BRANCH}-${{ github.sha }}"
           ACR_LOGIN_SERVER="${{ github.ref_name == 'dev' || github.ref_name == 'qa' && secrets.NONPROD_ACR_LOGIN_SERVER || secrets.PROD_ACR_LOGIN_SERVER }}"
+
+          if [ "${{ inputs.env-profile }}" = "ai" ]; then
+            docker load -i /tmp/build-images/main-image.tar
+          else
+            docker load -i /tmp/build-images/web-images.tar
+          fi
+
           IMAGE_REF="${ACR_LOGIN_SERVER}/${{ inputs.image-name }}:${IMAGE_TAG}"
           docker tag "${{ inputs.local-image }}" "${IMAGE_REF}"
           docker push "${IMAGE_REF}"
