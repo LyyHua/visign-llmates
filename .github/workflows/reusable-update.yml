@@ -1,0 +1,107 @@
+name: Reusable update kustomization
+
+on:
+  workflow_call:
+    secrets:
+      MANIFEST_REPO_TOKEN:
+        description: Token with write access to the visign-devops repository
+        required: true
+    inputs:
+      env-profile:
+        description: Build env profile (ai or web)
+        required: true
+        type: string
+      image-tag:
+        description: Image tag in ACR
+        required: true
+        type: string
+      kustomize-id:
+        description: Service ID for kustomization path (e.g., visign-web, visign-ai)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  write:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout manifest repo
+        uses: actions/checkout@v4
+        with:
+          repository: LyyHua/visign-devops
+          token: ${{ secrets.MANIFEST_REPO_TOKEN }}
+          path: visign-devops
+          fetch-depth: 0
+
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Update version manifest
+        run: |
+          set -euo pipefail
+          IMAGE_TAG="${{ inputs.image-tag}}"
+          IMAGE_NAME="${{ inputs.kustomize-id }}"
+          SERVICE_DIR="${{ inputs.env-profile }}"
+
+          if [ "${GITHUB_REF_NAME}" = "dev" ] || [ "${GITHUB_REF_NAME}" = "qa" ]; then
+            ACR_LOGIN_SERVER="${{ secrets.NONPROD_ACR_LOGIN_SERVER }}"
+          else
+            ACR_LOGIN_SERVER="${{ secrets.PROD_ACR_LOGIN_SERVER }}"
+          fi
+
+          export MAIN_IMAGE
+          export MIGRATOR_IMAGE
+
+          case "${GITHUB_REF_NAME}" in
+            dev|qa)
+              ENV_DIR="${GITHUB_REF_NAME}"
+              ;;
+            main)
+              ENV_DIR="prod"
+              ;;
+            *)
+              echo "Unsupported branch for manifest updates: ${GITHUB_REF_NAME}" >&2
+              exit 1
+              ;;
+          esac
+
+          KUSTOMIZE_FILE="apps/${SERVICE_DIR}/envs/${ENV_DIR}/version.yml"
+
+          # Ensure we pull remote changes and rebase to avoid push conflicts
+          cd visign-devops
+          git pull --rebase origin main
+
+          if [ "${{ inputs.env-profile }}" = "web" ]; then
+            MAIN_IMAGE="${ACR_LOGIN_SERVER}/visign-web:${IMAGE_TAG}"
+            MIGRATOR_IMAGE="${ACR_LOGIN_SERVER}/visign-web-migrator:${IMAGE_TAG}"
+
+            yq e -i '
+              (select(.kind == "Deployment" and .metadata.name == "visign-web").spec.template.spec.containers[] | select(.name == "visign-web").image) = strenv(MAIN_IMAGE) |
+              (select(.kind == "Job" and .metadata.name == "visign-db-migration").spec.template.spec.containers[] | select(.name == "migration").image) = strenv(MIGRATOR_IMAGE)
+            ' "${KUSTOMIZE_FILE}"
+          else
+            MAIN_IMAGE="${ACR_LOGIN_SERVER}/visign-ai:${IMAGE_TAG}"
+
+            yq e -i '
+              (select(.kind == "Deployment" and .metadata.name == "visign-ai").spec.template.spec.containers[] | select(.name == "visign-ai").image) = strenv(MAIN_IMAGE)
+            ' "${KUSTOMIZE_FILE}"
+          fi
+
+          if git diff --quiet "${KUSTOMIZE_FILE}"; then
+            echo "No changes to commit"
+            exit 0
+          fi
+
+          # Configure git for commit
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+
+          # Commit and push changes
+          git add "${KUSTOMIZE_FILE}"
+          git commit -m "chore(images): update ${IMAGE_NAME} to ${IMAGE_TAG} [skip ci]"
+          git push origin HEAD:main
+          echo "Updated ${KUSTOMIZE_FILE} with new image tag: ${IMAGE_TAG}"

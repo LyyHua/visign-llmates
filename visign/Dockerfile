@@ -39,7 +39,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
 ARG DATABASE_URL
 
-ENV NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-pk_test_ZGFzaGluZy1jb3diaXJkLTIwLmNsZXJrLmFjY291bnRzLmRldiQ}
+ENV NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
 ENV DATABASE_URL=${DATABASE_URL:-postgres://dummy:dummy@localhost:5432/dummy}
 
 # Build Next.js application
@@ -47,6 +47,25 @@ ENV DATABASE_URL=${DATABASE_URL:-postgres://dummy:dummy@localhost:5432/dummy}
 # but it also prevents .next/cache/fetch-cache from being included in the final image, meaning
 # cached fetch responses from the build won't be available at runtime.
 RUN npm run build --mount=type=cache,target=/app/.next/cache;
+
+# ============================================
+# Stage 4: Database Migration Image (for K8s Job)
+# ============================================
+FROM node:${NODE_VERSION} AS migrator
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+
+RUN apk add --no-cache postgresql-client
+
+# Copy dependencies and build artifacts from builder
+COPY --from=dependencies /app/node_modules ./node_modules
+COPY --from=builder /app/package.json ./
+COPY --from=builder /app/scripts ./scripts
+
+# Expose migration command
+CMD ["npm", "run", "db:migrate"]
 
 # ============================================
 # Stage 3: Run Next.js application

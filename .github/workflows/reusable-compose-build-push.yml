@@ -19,11 +19,19 @@ on:
         description: Build env profile (ai or web)
         required: true
         type: string
+      kustomize-id:
+        description: Service ID for kustomization path (e.g., visign-web, visign-ai)
+        required: true
+        type: string
       push-images:
         description: Push image to ACR after build
         required: false
         default: true
         type: boolean
+    outputs:
+      image-tag:
+        description: The tag of the image that was built and pushed
+        value: ${{ jobs.push.outputs.image-tag }}
 
 permissions:
   contents: write
@@ -31,8 +39,6 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    outputs:
-      image-tag: ${{ steps.build-push.outputs.image-tag }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -40,108 +46,136 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Write build env file
-        run: |
-          set -euo pipefail
-          if [ "${{ inputs.env-profile }}" = "ai" ]; then
-            echo "TORCH_COMPUTE=cpu" > .env
-          elif [ "${{ inputs.env-profile }}" = "web" ]; then
-            echo "DATABASE_URL=postgres://dummy:dummy@localhost:5432/dummy" >> .env
-            echo "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}" >> .env
-          else
-            echo "Unsupported env profile: ${{ inputs.env-profile }}" >&2
-            exit 1
-          fi
+      - name: Set up Docker layer cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ inputs.service }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ inputs.service }}-buildx-
 
-      - name: Build image with Buildx bake cache
+      - name: Build image
         env:
-          COMPOSE_DOCKER_CLI_BUILD: 1
           DOCKER_BUILDKIT: 1
           BUILDKIT_PROGRESS: plain
         run: |
           set -euo pipefail
-          docker buildx bake --file docker-compose.yml "${{ inputs.service }}" \
-            --set "${{ inputs.service }}.cache-from=type=gha,scope=${{ inputs.image-name }}" \
-            --set "${{ inputs.service }}.cache-to=type=gha,mode=max,scope=${{ inputs.image-name }}" \
-            --set "${{ inputs.service }}.output=type=docker,name=${{ inputs.local-image }}"
-          docker image inspect "${{ inputs.local-image }}" > /dev/null
+          mkdir -p /tmp/.buildx-cache
+
+          if [ "${{ inputs.env-profile }}" = "ai" ]; then
+            docker buildx build \
+              --file ai-model/Dockerfile \
+              --build-arg TORCH_COMPUTE=cpu \
+              --cache-from type=local,src=/tmp/.buildx-cache \
+              --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
+              --output type=docker,name=${{ inputs.local-image }} \
+              ai-model/
+
+          elif [ "${{ inputs.env-profile }}" = "web" ]; then
+            # Build the production runner stage
+            docker buildx build \
+              --file visign/Dockerfile \
+              --target runner \
+              --build-arg DATABASE_URL=postgres://dummy:dummy@localhost:5432/dummy \
+              --build-arg NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }} \
+              --cache-from type=local,src=/tmp/.buildx-cache \
+              --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
+              --output type=docker,name=${{ inputs.local-image }} \
+              visign/
+
+            # Build the migrator stage (reuses shared cache layers from runner build)
+            docker buildx build \
+              --file visign/Dockerfile \
+              --target migrator \
+              --build-arg DATABASE_URL=postgres://dummy:dummy@localhost:5432/dummy \
+              --build-arg NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }} \
+              --cache-from type=local,src=/tmp/.buildx-cache \
+              --output type=docker,name=visign-llmates-migrator:latest \
+              visign/
+
+          else
+            echo "Unsupported env-profile: ${{ inputs.env-profile }}" >&2
+            exit 1
+          fi
+
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+
+      - name: Save built images
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/build-images
+
+          if [ "${{ inputs.env-profile }}" = "ai" ]; then
+            docker save "${{ inputs.local-image }}" -o /tmp/build-images/main-image.tar
+          else
+            docker save "${{ inputs.local-image }}" visign-llmates-migrator:latest -o /tmp/build-images/web-images.tar
+          fi
+
+      - name: Upload built images
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.service }}-docker-images
+          path: /tmp/build-images/
+          retention-days: 1
+  push:
+    needs: build
+    outputs:
+      image-tag: ${{ steps.push.outputs.image-tag }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download built images
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.service }}-docker-images
+          path: /tmp/build-images
+
+      - name: Resolve ACR target
+        id: acr
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_NAME}" = "dev" ] || [ "${GITHUB_REF_NAME}" = "qa" ]; then
+            echo "login_server=${{ secrets.NONPROD_ACR_LOGIN_SERVER }}" >> "$GITHUB_OUTPUT"
+            echo "username=${{ secrets.NONPROD_ACR_USERNAME }}" >> "$GITHUB_OUTPUT"
+            echo "password=${{ secrets.NONPROD_ACR_PASSWORD }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "login_server=${{ secrets.PROD_ACR_LOGIN_SERVER }}" >> "$GITHUB_OUTPUT"
+            echo "username=${{ secrets.PROD_ACR_USERNAME }}" >> "$GITHUB_OUTPUT"
+            echo "password=${{ secrets.PROD_ACR_PASSWORD }}" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Login to ACR
         if: inputs.push-images
         uses: azure/docker-login@v1
         with:
-          login-server: ${{ github.ref_name == 'dev' && secrets.DEV_ACR_LOGIN_SERVER || secrets.PROD_ACR_LOGIN_SERVER }}
-          username: ${{ github.ref_name == 'dev' && secrets.DEV_ACR_USERNAME || secrets.PROD_ACR_USERNAME }}
-          password: ${{ github.ref_name == 'dev' && secrets.DEV_ACR_PASSWORD || secrets.PROD_ACR_PASSWORD }}
+          login-server: ${{ steps.acr.outputs.login_server }}
+          username: ${{ steps.acr.outputs.username }}
+          password: ${{ steps.acr.outputs.password }}
 
       - name: Tag and push image
-        id: build-push
+        id: push
         if: inputs.push-images
         run: |
           set -euo pipefail
           SAFE_BRANCH="${GITHUB_REF_NAME//\//-}"
           IMAGE_TAG="${SAFE_BRANCH}-${{ github.sha }}"
-          ACR_LOGIN_SERVER="${{ github.ref_name == 'dev' && secrets.DEV_ACR_LOGIN_SERVER || secrets.PROD_ACR_LOGIN_SERVER }}"
+          ACR_LOGIN_SERVER="${{ steps.acr.outputs.login_server }}"
+
+          if [ "${{ inputs.env-profile }}" = "ai" ]; then
+            docker load -i /tmp/build-images/main-image.tar
+          else
+            docker load -i /tmp/build-images/web-images.tar
+          fi
+
           IMAGE_REF="${ACR_LOGIN_SERVER}/${{ inputs.image-name }}:${IMAGE_TAG}"
           docker tag "${{ inputs.local-image }}" "${IMAGE_REF}"
           docker push "${IMAGE_REF}"
+
+          # Also push the migrator image if this is a web build
+          if [ "${{ inputs.env-profile }}" = "web" ]; then
+            MIGRATOR_REF="${ACR_LOGIN_SERVER}/visign-web-migrator:${IMAGE_TAG}"
+            docker tag visign-llmates-migrator:latest "${MIGRATOR_REF}"
+            docker push "${MIGRATOR_REF}"
+          fi
+
           echo "image-tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
-
-      - name: Install yq
-        if: inputs.push-images && github.event_name != 'pull_request'
-        run: |
-          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-          sudo chmod +x /usr/local/bin/yq
-
-      - name: Update kustomization.yaml
-        if: inputs.push-images && github.event_name != 'pull_request'
-        run: |
-          set -euo pipefail
-          IMAGE_TAG="${{ steps.build-push.outputs.image-tag }}"
-          ACR_LOGIN_SERVER="${{ github.ref_name == 'dev' && secrets.DEV_ACR_LOGIN_SERVER || secrets.PROD_ACR_LOGIN_SERVER }}"
-          IMAGE_NAME="${{ inputs.image-name }}"
-
-          if [ "${GITHUB_REF_NAME}" = "dev" ]; then
-            KUSTOMIZE_FILE="k8s-specifications/overlays/dev/kustomization.yaml"
-          else
-            KUSTOMIZE_FILE="k8s-specifications/overlays/prod/kustomization.yaml"
-          fi
-
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git config --global user.name "github-actions[bot]"
-
-          # Use yq to find the image entry by name and update newName + newTag in-place
-          yq e -i "
-            (.images[] | select(.name == \"${IMAGE_NAME}\") | .newName) = \"${ACR_LOGIN_SERVER}/${IMAGE_NAME}\" |
-            (.images[] | select(.name == \"${IMAGE_NAME}\") | .newTag) = \"${IMAGE_TAG}\"
-          " "${KUSTOMIZE_FILE}"
-
-          if git diff --quiet "${KUSTOMIZE_FILE}"; then
-            echo "No changes to commit"
-            exit 0
-          fi
-
-          git add "${KUSTOMIZE_FILE}"
-          git commit -m "chore(images): update ${IMAGE_NAME} to ${IMAGE_TAG} [skip ci]"
-          
-          # Anti-Race-Condition Retry Loop
-          MAX_RETRIES=3
-          ATTEMPT=0
-          
-          while [ $ATTEMPT -lt $MAX_RETRIES ]; do
-            if git push origin "${GITHUB_REF_NAME}"; then
-              echo "Updated ${KUSTOMIZE_FILE} with new tag: ${IMAGE_TAG}"
-              break
-            else
-              echo "Push failed (likely a race condition). Rebasing and retrying..."
-              ATTEMPT=$((ATTEMPT+1))
-              # Fetch and rebase on top of the other workflow's commit
-              git pull --rebase origin "${GITHUB_REF_NAME}"
-              if [ $ATTEMPT -eq $MAX_RETRIES ]; then
-                echo "Failed to push after $MAX_RETRIES attempts."
-                exit 1
-              fi
-              # Wait a random amount of seconds (1-3) to offset the race
-              sleep $((1 + $RANDOM % 3))
-            fi
-          done
